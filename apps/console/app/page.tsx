@@ -63,6 +63,14 @@ export default function RelayConsolePage() {
     };
   }, [refreshDevices]);
 
+  useEffect(() => {
+    if (!selectedId && devices.length === 1) {
+      const [device] = devices;
+      setSelectedId(device.installId);
+      window.location.hash = `device=${encodeURIComponent(device.installId)}`;
+    }
+  }, [devices, selectedId]);
+
   const selectDevice = useCallback(
     (device: MiraDevice) => {
       setSelectedId(device.installId);
@@ -84,9 +92,9 @@ export default function RelayConsolePage() {
   }, [relayUrl]);
 
   return (
-    <main className="relative h-screen overflow-hidden bg-[#050816] text-slate-100">
+    <main className="relative h-screen overflow-hidden bg-[#f5f5f5] text-[#111]">
       <BackgroundGlow />
-      <div className="relative z-10 flex h-full flex-col p-4 lg:p-5">
+      <div className="relative z-10 flex h-full flex-col">
         <TopBar
           relayUrl={relayUrl}
           devices={devices}

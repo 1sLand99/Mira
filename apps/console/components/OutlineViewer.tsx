@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import type { Outline, OutlineNode, OutlineRect } from '@/lib/types';
+import type { Outline, OutlineNode } from '@/lib/types';
 
 type RenderRect = {
   x: number;
@@ -23,30 +23,30 @@ export function OutlineViewer({ outline, className }: { outline?: Outline | null
 
   if (!outline || nodes.length === 0) {
     return (
-      <div className={clsx('grid h-full min-h-[420px] place-items-center rounded-[2rem] border border-dashed border-white/10 bg-slate-950/45 p-8 text-center', className)}>
+      <div className={clsx('grid h-full min-h-[420px] place-items-center bg-[#111] p-6 text-center font-mono text-[#d8d8d8]', className)}>
         <div>
-          <div className="mx-auto mb-4 h-16 w-10 rounded-[1.2rem] border border-emerald-300/30 bg-emerald-300/10 shadow-[0_0_40px_rgba(52,211,153,0.12)]" />
-          <div className="text-sm font-semibold text-slate-200">No outline available</div>
-          <div className="mt-2 max-w-[220px] text-xs leading-5 text-slate-500">设备暂未上报 UI 轮廓. 保持 Mira 前台连接后刷新设备状态.</div>
+          <div className="mx-auto mb-4 h-16 w-10 border border-[#2fd0a6]" />
+          <div className="text-[13px] font-semibold">No outline available</div>
+          <div className="mt-2 max-w-[220px] text-[11px] leading-5 text-[#888]">设备暂未上报 UI 轮廓. 保持 Mira 前台连接后刷新设备状态.</div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={clsx('relative h-full min-h-[420px] overflow-hidden rounded-[2rem] border border-white/10 bg-[#050816]', className)}>
+    <div className={clsx('relative h-full min-h-[420px] overflow-hidden bg-[#111]', className)}>
       <svg
         viewBox={`0 0 ${viewport.width} ${viewport.height}`}
         role="img"
         aria-label="Device outline"
-        className="h-full w-full bg-[radial-gradient(circle_at_50%_0%,rgba(52,211,153,0.12),transparent_38%),linear-gradient(180deg,rgba(15,23,42,0.88),rgba(2,6,23,0.92))]"
+        className="h-full w-full bg-[#111]"
         preserveAspectRatio="xMidYMid meet"
       >
-        <rect x="0" y="0" width={viewport.width} height={viewport.height} rx="28" fill="rgba(15,23,42,0.35)" />
+        <rect x="0" y="0" width={viewport.width} height={viewport.height} fill="#111" />
         {nodes.map(({ key, node, rect, depth }, index) => {
           const important = isImportantNode(node);
-          const stroke = important ? 'rgba(52,211,153,0.9)' : depth < 2 ? 'rgba(125,211,252,0.58)' : 'rgba(148,163,184,0.32)';
-          const fill = important ? 'rgba(52,211,153,0.08)' : depth < 2 ? 'rgba(14,165,233,0.045)' : 'rgba(148,163,184,0.025)';
+          const stroke = important ? '#2fd0a6' : depth < 2 ? '#6b7280' : '#3f3f46';
+          const fill = important ? 'rgba(47,208,166,0.08)' : 'rgba(255,255,255,0.018)';
           return (
             <g key={key}>
               <rect
@@ -54,15 +54,14 @@ export function OutlineViewer({ outline, className }: { outline?: Outline | null
                 y={rect.y}
                 width={Math.max(rect.width, 1)}
                 height={Math.max(rect.height, 1)}
-                rx={Math.min(12, Math.max(2, Math.min(rect.width, rect.height) / 8))}
                 fill={fill}
                 stroke={stroke}
-                strokeWidth={important ? 2.2 : 1.2}
+                strokeWidth={important ? 2 : 1}
                 vectorEffect="non-scaling-stroke"
-                opacity={Math.max(0.24, 0.9 - depth * 0.08)}
+                opacity={Math.max(0.22, 0.88 - depth * 0.08)}
               />
               {important && rect.width > 72 && rect.height > 24 && (
-                <text x={rect.x + 8} y={rect.y + 17} fill="rgba(209,250,229,0.95)" fontSize="12" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+                <text x={rect.x + 7} y={rect.y + 16} fill="#d8fff3" fontSize="12" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
                   {labelForNode(node, index)}
                 </text>
               )}
@@ -70,7 +69,7 @@ export function OutlineViewer({ outline, className }: { outline?: Outline | null
           );
         })}
       </svg>
-      <div className="pointer-events-none absolute bottom-3 left-3 rounded-2xl border border-white/10 bg-slate-950/75 px-3 py-2 font-mono text-[10px] text-slate-400 backdrop-blur">
+      <div className="pointer-events-none absolute bottom-2 left-2 bg-[#111] px-1 font-mono text-[10px] text-[#8a8a8a]">
         {nodes.length} nodes · {Math.round(viewport.width)} x {Math.round(viewport.height)}
       </div>
     </div>

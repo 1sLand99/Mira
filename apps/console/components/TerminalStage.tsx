@@ -2,13 +2,10 @@
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
-import clsx from 'clsx';
-import { Maximize2, Play, Power, RotateCw, TerminalSquare } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { base64ToBytes, browserWsUrl, bytesToBase64, closeSession, openSession } from '@/lib/relay';
 import type { MiraDevice, SessionStatus } from '@/lib/types';
-import { deviceTitle, shortId } from '@/lib/format';
-import { StatusPill } from './StatusPill';
+import { shortId } from '@/lib/format';
 
 type RelayMessage = {
   type?: string;
@@ -71,30 +68,30 @@ export function TerminalStage({
       convertEol: true,
       fontFamily: '"JetBrains Mono", "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace',
       fontSize: 13,
-      lineHeight: 1.16,
+      lineHeight: 1.14,
       letterSpacing: 0,
       scrollback: 5000,
       theme: {
-        background: '#030712',
-        foreground: '#E5E7EB',
-        cursor: '#34D399',
-        selectionBackground: '#334155',
-        black: '#020617',
-        brightBlack: '#475569',
-        red: '#F87171',
-        brightRed: '#FCA5A5',
-        green: '#34D399',
-        brightGreen: '#86EFAC',
-        yellow: '#FBBF24',
-        brightYellow: '#FDE68A',
-        blue: '#60A5FA',
-        brightBlue: '#93C5FD',
-        magenta: '#C084FC',
-        brightMagenta: '#D8B4FE',
-        cyan: '#22D3EE',
-        brightCyan: '#67E8F9',
-        white: '#CBD5E1',
-        brightWhite: '#F8FAFC',
+        background: '#111111',
+        foreground: '#e6e6e6',
+        cursor: '#54d6bd',
+        selectionBackground: '#3a3a3a',
+        black: '#000000',
+        brightBlack: '#555555',
+        red: '#e06c75',
+        brightRed: '#ff7b86',
+        green: '#54d6bd',
+        brightGreen: '#70e8ce',
+        yellow: '#d7ba7d',
+        brightYellow: '#f0d48a',
+        blue: '#61afef',
+        brightBlue: '#7ec7ff',
+        magenta: '#c678dd',
+        brightMagenta: '#dc8cff',
+        cyan: '#56b6c2',
+        brightCyan: '#6ed3df',
+        white: '#d6d6d6',
+        brightWhite: '#ffffff',
       },
     });
     const fit = new FitAddon();
@@ -102,7 +99,7 @@ export function TerminalStage({
     terminal.open(terminalHost.current);
     terminalRef.current = terminal;
     fitRef.current = fit;
-    terminal.writeln('\x1b[38;5;245mSelect a device and open a Mira PTY session.\x1b[0m');
+    terminal.writeln('\x1b[38;5;245mMira PTY. Open a session to attach Android shell.\x1b[0m');
     window.setTimeout(fitAndResize, 0);
 
     const inputDisposable = terminal.onData((data) => {
@@ -219,62 +216,35 @@ export function TerminalStage({
   }, []);
 
   const canOpen = Boolean(device && device.state !== 'offline' && device.state !== 'active' && device.state !== 'opening' && !sessionId);
+  const openButtonClass = canOpen
+    ? 'border-[#777] bg-[#f0f0f0] text-[#111] hover:bg-white'
+    : 'cursor-not-allowed border-[#444] bg-[#222] text-[#777]';
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-[#030712] shadow-[0_30px_120px_rgba(0,0,0,0.42)]">
-      <header className="flex items-center justify-between border-b border-white/10 bg-slate-950/80 px-5 py-4 backdrop-blur">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-emerald-300/20 bg-emerald-300/10 text-emerald-300">
-            <TerminalSquare size={19} />
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-slate-100">{device ? deviceTitle(device) : 'Mira Terminal'}</div>
-            <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-slate-500">
-              <span>{sessionId ? shortId(sessionId) : 'no-session'}</span>
-              <span>·</span>
-              <span>{size.cols} x {size.rows}</span>
-              <span>·</span>
-              <span>{transportStatus}</span>
-            </div>
-          </div>
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[#111] text-[#e6e6e6]">
+      <header className="flex h-7 shrink-0 items-center justify-between border-b border-[#2a2a2a] bg-[#0d0d0d] px-2 font-mono text-[12px] text-[#cfcfcf]">
+        <div className="min-w-0 truncate">
+          <span className="text-white">λ</span> {sessionStatus} · {transportStatus} · {size.cols} x {size.rows}
         </div>
-        <div className="flex items-center gap-2">
-          <StatusPill state={sessionStatus} label={sessionStatus} />
-          <button
-            type="button"
-            onClick={fitAndResize}
-            className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.035] text-slate-300 transition hover:border-white/20 hover:bg-white/[0.07]"
-            title="Fit terminal"
-          >
-            <Maximize2 size={16} />
+        <div className="flex h-full items-center">
+          <button type="button" onClick={fitAndResize} className="h-full border-l border-[#2a2a2a] px-2 text-[#cfcfcf] hover:bg-[#1b1b1b]">
+            fit
           </button>
           {sessionId ? (
-            <button type="button" onClick={handleClose} className="inline-flex h-10 items-center gap-2 rounded-2xl bg-red-400/12 px-4 text-sm font-semibold text-red-200 transition hover:bg-red-400/18">
-              <Power size={15} /> Close
+            <button type="button" onClick={handleClose} className="h-full border-l border-[#2a2a2a] px-2 text-[#f2b8b8] hover:bg-[#1b1b1b]">
+              close
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={handleOpen}
-              disabled={!canOpen}
-              className={clsx(
-                'inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-sm font-semibold transition',
-                canOpen ? 'bg-emerald-400 text-slate-950 hover:bg-emerald-300' : 'cursor-not-allowed bg-slate-700/60 text-slate-400',
-              )}
-            >
-              <Play size={15} /> Open Terminal
+            <button type="button" onClick={handleOpen} disabled={!canOpen} className={`ml-2 border px-2 py-0.5 ${openButtonClass}`}>
+              open
             </button>
           )}
         </div>
       </header>
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_20%_0%,rgba(16,185,129,0.08),transparent_28%),linear-gradient(180deg,#030712,#020617)]">
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-[#111]">
         {!device && (
-          <div className="absolute inset-0 z-10 grid place-items-center bg-slate-950/30 text-center backdrop-blur-[1px]">
-            <div className="max-w-sm rounded-3xl border border-white/10 bg-slate-950/80 p-7 shadow-2xl">
-              <RotateCw className="mx-auto mb-4 text-emerald-300" />
-              <div className="text-lg font-semibold">Select a device</div>
-              <div className="mt-2 text-sm leading-6 text-slate-400">Android Mira 保持前台连接后, 在左侧选择设备进入真实 PTY。</div>
-            </div>
+          <div className="absolute inset-0 z-10 grid place-items-center bg-[#111] font-mono text-[12px] text-[#aaa]">
+            Select a device.
           </div>
         )}
         <div ref={terminalHost} className="h-full w-full" />

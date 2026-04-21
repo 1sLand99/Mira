@@ -6,24 +6,22 @@ export function StatusPill({ state, label }: { state?: string; label?: string })
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]',
-        tone === 'good' && 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
-        tone === 'warn' && 'border-amber-300/30 bg-amber-300/10 text-amber-200',
-        tone === 'bad' && 'border-red-400/30 bg-red-400/10 text-red-300',
-        tone === 'muted' && 'border-slate-500/30 bg-slate-500/10 text-slate-300',
+        'inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em]',
+        tone === 'good' && 'border-[#23a06f] bg-[#e9fff6] text-[#0f6d4a]',
+        tone === 'warn' && 'border-[#b7791f] bg-[#fff7e6] text-[#7a4c00]',
+        tone === 'bad' && 'border-[#c0392b] bg-[#fff0ef] text-[#8f1f15]',
+        tone === 'muted' && 'border-[#999] bg-[#f2f2f2] text-[#555]',
       )}
     >
-      <span className="relative flex h-2 w-2">
-        <span
-          className={clsx(
-            'relative inline-flex h-2 w-2 rounded-full',
-            tone === 'good' && 'bg-emerald-300',
-            tone === 'warn' && 'bg-amber-300',
-            tone === 'bad' && 'bg-red-300',
-            tone === 'muted' && 'bg-slate-400',
-          )}
-        />
-      </span>
+      <span
+        className={clsx(
+          'inline-block h-1.5 w-1.5',
+          tone === 'good' && 'bg-[#23a06f]',
+          tone === 'warn' && 'bg-[#b7791f]',
+          tone === 'bad' && 'bg-[#c0392b]',
+          tone === 'muted' && 'bg-[#777]',
+        )}
+      />
       {label || state || 'unknown'}
     </span>
   );
