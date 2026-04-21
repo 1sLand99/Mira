@@ -12,11 +12,11 @@ CLOUDFLARED_PID=""
 RELAY_PID=""
 ADVERTISE_URL_FILE=""
 LOCAL_ADVERTISE_URL="${MIRA_LOCAL_ADVERTISE_URL:-http://localhost:${PORT}}"
-TUNNEL_ATTEMPTS="${MIRA_TUNNEL_ATTEMPTS:-3}"
+TUNNEL_ATTEMPTS="${MIRA_TUNNEL_ATTEMPTS:-0}"
 TUNNEL_URL_TIMEOUT_SECONDS="${MIRA_TUNNEL_URL_TIMEOUT_SECONDS:-30}"
 TUNNEL_DNS_TIMEOUT_SECONDS="${MIRA_TUNNEL_DNS_TIMEOUT_SECONDS:-45}"
 TUNNEL_HTTP_TIMEOUT_SECONDS="${MIRA_TUNNEL_HTTP_TIMEOUT_SECONDS:-30}"
-TUNNEL_STRICT_CHECK="${MIRA_TUNNEL_STRICT_CHECK:-0}"
+TUNNEL_STRICT_CHECK="${MIRA_TUNNEL_STRICT_CHECK:-1}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<'MSG'
@@ -41,7 +41,8 @@ Environment variables:
                    LAN URL shown for Android devices on the same Wi-Fi,
                    auto-detected by default
   MIRA_TUNNEL_ATTEMPTS
-                   Cloudflare quick tunnel creation attempts, default 3
+                   Cloudflare quick tunnel creation attempts, default 0 means
+                   keep retrying random hostnames until one is reachable
   MIRA_TUNNEL_URL_TIMEOUT_SECONDS
                    Seconds to wait for cloudflared to print a URL, default 30
   MIRA_TUNNEL_DNS_TIMEOUT_SECONDS
@@ -49,8 +50,9 @@ Environment variables:
   MIRA_TUNNEL_HTTP_TIMEOUT_SECONDS
                    Seconds to wait for the printed URL to return HTTP, default 30
   MIRA_TUNNEL_STRICT_CHECK
-                   Set to 1 to block startup until system DNS and HTTP checks pass,
-                   default 0
+                   Set to 0 to print the tunnel URL as soon as cloudflared publishes it.
+                   Default 1 waits until DNS and direct HTTP checks pass, which is
+                   safer for Android phones outside the local network.
 MSG
   exit 0
 fi
@@ -211,10 +213,55 @@ hostname_resolves() {
 
   host="$1"
   "${PYTHON_BIN}" - "${host}" <<'PY' >/dev/null 2>&1
+import random
 import socket
+import struct
 import sys
 
-socket.getaddrinfo(sys.argv[1], 443)
+host = sys.argv[1]
+
+
+def system_dns_resolves() -> bool:
+    try:
+        socket.getaddrinfo(host, 443)
+        return True
+    except OSError:
+        return False
+
+
+def encode_name(value: str) -> bytes:
+    return b"".join(bytes([len(part)]) + part.encode("ascii") for part in value.split(".")) + b"\0"
+
+
+def public_dns_resolves(server: str, qtype: int) -> bool:
+    query_id = random.randrange(0, 65536)
+    packet = (
+        struct.pack("!HHHHHH", query_id, 0x0100, 1, 0, 0, 0)
+        + encode_name(host)
+        + struct.pack("!HH", qtype, 1)
+    )
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.settimeout(2)
+        sock.sendto(packet, (server, 53))
+        data, _ = sock.recvfrom(512)
+    if len(data) < 12:
+        return False
+    response_id, _flags, _qdcount, ancount, _nscount, _arcount = struct.unpack("!HHHHHH", data[:12])
+    return response_id == query_id and ancount > 0 and (data[3] & 0x0F) == 0
+
+
+if system_dns_resolves():
+    raise SystemExit(0)
+
+for dns_server in ("1.1.1.1", "8.8.8.8"):
+    for dns_type in (1, 28):
+        try:
+            if public_dns_resolves(dns_server, dns_type):
+                raise SystemExit(0)
+        except OSError:
+            pass
+
+raise SystemExit(1)
 PY
 }
 
@@ -227,7 +274,8 @@ import sys
 import urllib.request
 
 request = urllib.request.Request(sys.argv[1], headers={"User-Agent": "mira-startup-check"})
-with urllib.request.urlopen(request, timeout=2) as response:
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+with opener.open(request, timeout=2) as response:
     if 200 <= response.status < 500:
         sys.exit(0)
     sys.exit(1)
@@ -361,6 +409,7 @@ wait_for_tunnel_url() {
 
 start_cloudflare_tunnel() {
   local attempt
+  local attempt_label
 
   if ! command -v "${CLOUDFLARED_BIN}" >/dev/null 2>&1; then
     echo "cloudflared not found. Continuing with local browser access only." >&2
@@ -368,9 +417,19 @@ start_cloudflare_tunnel() {
     return 1
   fi
 
-  for attempt in $(seq 1 "${TUNNEL_ATTEMPTS}"); do
+  attempt=1
+  while true; do
+    if (( TUNNEL_ATTEMPTS > 0 && attempt > TUNNEL_ATTEMPTS )); then
+      break
+    fi
+    if (( TUNNEL_ATTEMPTS > 0 )); then
+      attempt_label="${attempt}/${TUNNEL_ATTEMPTS}"
+    else
+      attempt_label="${attempt}/until-reachable"
+    fi
+
     LOG_FILE="$(mktemp -t mira-cloudflared.XXXXXX.log)"
-    echo "Starting Cloudflare quick tunnel for http://127.0.0.1:${PORT} ... attempt ${attempt}/${TUNNEL_ATTEMPTS}"
+    echo "Starting Cloudflare quick tunnel for http://127.0.0.1:${PORT} ... attempt ${attempt_label}"
     "${CLOUDFLARED_BIN}" tunnel \
       --edge-ip-version 4 \
       --protocol http2 \
@@ -381,19 +440,21 @@ start_cloudflare_tunnel() {
     if wait_for_tunnel_url; then
       if [[ "${TUNNEL_STRICT_CHECK}" != "1" ]]; then
         echo "Cloudflare quick tunnel URL is published: ${PUBLIC_URL}"
-        echo "Skipping strict system DNS check. Browser DNS may differ from terminal DNS."
+        echo "Skipping public DNS and direct HTTP checks because MIRA_TUNNEL_STRICT_CHECK=0."
         return 0
       fi
 
       if wait_for_tunnel_dns "${PUBLIC_URL}" && wait_for_tunnel_http "${PUBLIC_URL}"; then
+        echo "Cloudflare quick tunnel is reachable: ${PUBLIC_URL}"
         return 0
       fi
     fi
 
     stop_cloudflared
-    if (( attempt < TUNNEL_ATTEMPTS )); then
+    if (( TUNNEL_ATTEMPTS == 0 || attempt < TUNNEL_ATTEMPTS )); then
       echo "Retrying Cloudflare quick tunnel with a new hostname ..." >&2
     fi
+    attempt=$((attempt + 1))
   done
 
   echo "Failed to create a reachable Cloudflare quick tunnel after ${TUNNEL_ATTEMPTS} attempt(s)." >&2

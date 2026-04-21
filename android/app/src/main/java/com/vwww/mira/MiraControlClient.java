@@ -7,6 +7,7 @@ import org.json.JSONObject;
 
 import java.io.Closeable;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.Executors;
@@ -92,7 +93,7 @@ public final class MiraControlClient implements Closeable {
             } catch (Throwable throwable) {
                 if (running.get()) {
                     Log.w(TAG, "Control channel failed", throwable);
-                    notifyStatus("control disconnected: " + throwable.getMessage());
+                    notifyStatus("control disconnected: " + describeFailure(throwable));
                     sleepQuietly(2000);
                 }
             } finally {
@@ -201,6 +202,19 @@ public final class MiraControlClient implements Closeable {
     private void notifyStatus(String status) {
         Log.i(TAG, status);
         if (callback != null) callback.onControlStatus(status);
+    }
+
+    private String describeFailure(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof UnknownHostException) {
+                String host = current.getMessage();
+                return "DNS failed" + (host == null || host.trim().isEmpty() ? "" : ": " + host);
+            }
+            current = current.getCause();
+        }
+        String message = throwable.getMessage();
+        return message == null || message.trim().isEmpty() ? throwable.getClass().getSimpleName() : message;
     }
 
     private void sleepQuietly(long millis) {
