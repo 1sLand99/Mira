@@ -40,6 +40,7 @@ public final class MiraDiscoveryService extends Service {
     public static final String ACTION_STOP = "com.vwww.mira.discovery.STOP";
     public static final String EXTRA_DEVICE_NAME = "device_name";
     public static final String EXTRA_DISCOVERY_PORT = "discovery_port";
+    public static final String EXTRA_RELAY_URL = "relay_url";
 
     private static final int NOTIFICATION_ID = 1001;
     private static final String CHANNEL_ID = "mira_discovery";
@@ -56,9 +57,11 @@ public final class MiraDiscoveryService extends Service {
     private Thread udpThread;
     private Thread wakeThread;
     private String deviceName = "Mira Device";
+    private String relayUrl = "";
     private int discoveryPort = 8766;
     private volatile String state = "idle";
     private volatile MiraRelayClient relayClient;
+    private volatile MiraControlClient controlClient;
 
     @Override
     public void onCreate() {
@@ -78,9 +81,10 @@ public final class MiraDiscoveryService extends Service {
         if (intent != null) {
             deviceName = intent.getStringExtra(EXTRA_DEVICE_NAME) == null ? identity.defaultDeviceName() : intent.getStringExtra(EXTRA_DEVICE_NAME);
             discoveryPort = intent.getIntExtra(EXTRA_DISCOVERY_PORT, discoveryPort);
+            relayUrl = intent.getStringExtra(EXTRA_RELAY_URL) == null ? "" : intent.getStringExtra(EXTRA_RELAY_URL).trim();
         }
         if (running.get()) stopDiscovery();
-        startForeground(NOTIFICATION_ID, buildNotification("Mira discovery idle"));
+        startForeground(NOTIFICATION_ID, buildNotification(relayUrl.isEmpty() ? "Mira discovery idle" : "Mira relay connecting"));
         startDiscovery();
         return START_STICKY;
     }
@@ -99,8 +103,13 @@ public final class MiraDiscoveryService extends Service {
 
     private void startDiscovery() {
         if (!running.compareAndSet(false, true)) return;
+        state = "idle";
         try {
             bootstrap.installIfNeeded();
+            if (!relayUrl.isEmpty()) {
+                startControlClient();
+                return;
+            }
             acquireMulticastLock();
 
             wakeServer = new ServerSocket();
@@ -116,7 +125,6 @@ public final class MiraDiscoveryService extends Service {
             releaseMulticastLock();
             throw new RuntimeException(e);
         }
-        state = "idle";
         Log.i(TAG, "Discovery started udp=" + discoveryPort + " wake=" + wakeServer.getLocalPort() + " ip=" + localIPv4());
         udpThread = new Thread(this::udpLoop, "MiraDiscoveryUdp");
         wakeThread = new Thread(this::wakeLoop, "MiraDiscoveryWake");
@@ -124,9 +132,36 @@ public final class MiraDiscoveryService extends Service {
         wakeThread.start();
     }
 
+    private void startControlClient() {
+        controlClient = new MiraControlClient(
+            this,
+            identity,
+            deviceName,
+            relayUrl,
+            () -> state,
+            new MiraControlClient.Callback() {
+                @Override
+                public void onControlMessage(JSONObject message) {
+                    handleControlMessage(message);
+                }
+
+                @Override
+                public void onControlStatus(String status) {
+                    updateNotification("Mira relay " + status);
+                }
+            }
+        );
+        controlClient.start();
+        Log.i(TAG, "Control client starting relayUrl=" + relayUrl);
+    }
+
     private void stopDiscovery() {
         running.set(false);
         closeRelay();
+        if (controlClient != null) {
+            controlClient.close();
+            controlClient = null;
+        }
         closeQuietly(udpSocket);
         closeQuietly(wakeServer);
         releaseMulticastLock();
@@ -183,26 +218,9 @@ public final class MiraDiscoveryService extends Service {
                 writeJson(output, "404 Not Found", new JSONObject().put("error", "wrong installId"));
                 return;
             }
-            synchronized (this) {
-                if (relayClient != null) {
-                    writeJson(output, "409 Conflict", new JSONObject().put("error", "session already active"));
-                    return;
-                }
-                state = "opening";
-                relayClient = new MiraRelayClient(
-                    this,
-                    bootstrap,
-                    identity,
-                    body.optString("serverWs"),
-                    body.optString("sessionId"),
-                    body.optInt("cols", 80),
-                    body.optInt("rows", 24),
-                    this::onRelayClosed
-                );
-                relayClient.start();
-                state = "active";
-                updateNotification("Mira terminal active");
-                Log.i(TAG, "Relay session opening sessionId=" + body.optString("sessionId"));
+            if (!openRelaySession(body)) {
+                writeJson(output, "409 Conflict", new JSONObject().put("error", "session already active"));
+                return;
             }
             writeJson(output, "200 OK", new JSONObject().put("ok", true).put("state", state));
         } catch (Throwable throwable) {
@@ -210,10 +228,47 @@ public final class MiraDiscoveryService extends Service {
         }
     }
 
+    private void handleControlMessage(JSONObject body) {
+        try {
+            String type = body.optString("type", "");
+            if ("session.open".equals(type)) {
+                if (!identity.getInstallId().equals(body.optString("installId"))) {
+                    Log.w(TAG, "Ignoring session.open for wrong installId");
+                    return;
+                }
+                openRelaySession(body);
+            } else if ("session.close".equals(type)) {
+                closeRelay();
+            }
+        } catch (Throwable throwable) {
+            Log.w(TAG, "Control message failed", throwable);
+        }
+    }
+
+    private synchronized boolean openRelaySession(JSONObject body) {
+        if (relayClient != null) return false;
+        state = "opening";
+        relayClient = new MiraRelayClient(
+            this,
+            bootstrap,
+            identity,
+            body.optString("serverWs"),
+            body.optString("sessionId"),
+            body.optInt("cols", 80),
+            body.optInt("rows", 24),
+            this::onRelayClosed
+        );
+        relayClient.start();
+        state = "active";
+        updateNotification("Mira terminal active");
+        Log.i(TAG, "Relay session opening sessionId=" + body.optString("sessionId"));
+        return true;
+    }
+
     private synchronized void onRelayClosed() {
         relayClient = null;
         state = "idle";
-        updateNotification("Mira discovery idle");
+        updateNotification(relayUrl.isEmpty() ? "Mira discovery idle" : "Mira relay connected");
         Log.i(TAG, "Relay session closed");
     }
 

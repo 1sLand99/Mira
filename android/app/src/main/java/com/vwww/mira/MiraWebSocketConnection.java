@@ -1,0 +1,222 @@
+package com.vwww.mira;
+
+import android.util.Base64;
+import android.util.Log;
+
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.util.Locale;
+
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+
+public final class MiraWebSocketConnection implements Closeable {
+    private static final String TAG = "MiraWebSocket";
+    private static final int MAX_FRAME_SIZE = 1024 * 1024;
+
+    private final Object writeLock = new Object();
+    private Socket socket;
+    private InputStream input;
+    private OutputStream output;
+
+    private MiraWebSocketConnection(Socket socket, InputStream input, OutputStream output) {
+        this.socket = socket;
+        this.input = input;
+        this.output = output;
+    }
+
+    public static MiraWebSocketConnection connect(String url) throws Exception {
+        URI uri = new URI(url);
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        boolean tls;
+        int defaultPort;
+        if ("ws".equals(scheme)) {
+            tls = false;
+            defaultPort = 80;
+        } else if ("wss".equals(scheme)) {
+            tls = true;
+            defaultPort = 443;
+        } else {
+            throw new IOException("Only ws:// and wss:// relay URLs are supported");
+        }
+
+        String host = uri.getHost();
+        if (host == null || host.trim().isEmpty()) throw new IOException("WebSocket host is empty");
+        int port = uri.getPort() > 0 ? uri.getPort() : defaultPort;
+        String path = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
+        if (uri.getRawQuery() != null) path += "?" + uri.getRawQuery();
+
+        Log.i(TAG, "Connecting websocket " + url);
+        Socket connected = openSocket(host, port, tls);
+        connected.setSoTimeout(15000);
+        connected.setTcpNoDelay(true);
+        InputStream input = connected.getInputStream();
+        OutputStream output = connected.getOutputStream();
+
+        byte[] nonce = new byte[16];
+        new SecureRandom().nextBytes(nonce);
+        String key = Base64.encodeToString(nonce, Base64.NO_WRAP);
+        String hostHeader = port == defaultPort ? host : host + ":" + port;
+        String request = "GET " + path + " HTTP/1.1\r\n" +
+            "Host: " + hostHeader + "\r\n" +
+            "Upgrade: websocket\r\n" +
+            "Connection: Upgrade\r\n" +
+            "Sec-WebSocket-Key: " + key + "\r\n" +
+            "Sec-WebSocket-Version: 13\r\n\r\n";
+        output.write(request.getBytes(StandardCharsets.US_ASCII));
+        output.flush();
+        String response = readHttpHeader(input);
+        Log.i(TAG, "WebSocket handshake " + response.split("\r\n", 2)[0]);
+        if (!response.toLowerCase(Locale.ROOT).contains("101 switching protocols")) {
+            throw new IOException("WebSocket handshake failed: " + response.split("\r\n", 2)[0]);
+        }
+        connected.setSoTimeout(0);
+        return new MiraWebSocketConnection(connected, input, output);
+    }
+
+    private static Socket openSocket(String host, int port, boolean tls) throws IOException {
+        Socket raw = new Socket();
+        raw.connect(new InetSocketAddress(host, port), 5000);
+        if (!tls) return raw;
+        SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+        SSLSocket sslSocket = (SSLSocket) factory.createSocket(raw, host, port, true);
+        sslSocket.startHandshake();
+        return sslSocket;
+    }
+
+    public void sendJson(JSONObject json) throws IOException {
+        sendFrame(json.toString().getBytes(StandardCharsets.UTF_8), 0x1);
+    }
+
+    public void sendPong(byte[] payload) throws IOException {
+        sendFrame(payload, 0xA);
+    }
+
+    public void sendFrame(byte[] payload, int opcode) throws IOException {
+        synchronized (writeLock) {
+            if (output == null) return;
+            output.write(0x80 | opcode);
+            int length = payload.length;
+            byte[] mask = new byte[4];
+            new SecureRandom().nextBytes(mask);
+            if (length < 126) {
+                output.write(0x80 | length);
+            } else if (length <= 0xFFFF) {
+                output.write(0x80 | 126);
+                output.write((length >> 8) & 0xFF);
+                output.write(length & 0xFF);
+            } else {
+                output.write(0x80 | 127);
+                long longLength = length;
+                for (int i = 7; i >= 0; i--) output.write((int) ((longLength >> (8 * i)) & 0xFF));
+            }
+            output.write(mask);
+            for (int i = 0; i < payload.length; i++) output.write(payload[i] ^ mask[i % 4]);
+            output.flush();
+        }
+    }
+
+    public WebSocketFrame readFrame() throws IOException {
+        int first = readByte(input);
+        int second = readByte(input);
+        int opcode = first & 0x0F;
+        boolean masked = (second & 0x80) != 0;
+        long length = second & 0x7F;
+        if (length == 126) length = readUnsignedShort(input);
+        else if (length == 127) length = readLong(input);
+        if (length > MAX_FRAME_SIZE) throw new IOException("WebSocket frame too large");
+        byte[] mask = masked ? readExactly(input, 4) : null;
+        byte[] payload = readExactly(input, (int) length);
+        if (masked && mask != null) {
+            for (int i = 0; i < payload.length; i++) payload[i] = (byte) (payload[i] ^ mask[i % 4]);
+        }
+        return new WebSocketFrame(opcode, payload);
+    }
+
+    private static String readHttpHeader(InputStream input) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int state = 0;
+        while (true) {
+            int value = input.read();
+            if (value == -1) throw new IOException("Unexpected EOF");
+            buffer.write(value);
+            if (state == 0 && value == '\r') state = 1;
+            else if (state == 1 && value == '\n') state = 2;
+            else if (state == 2 && value == '\r') state = 3;
+            else if (state == 3 && value == '\n') break;
+            else state = 0;
+            if (buffer.size() > 64 * 1024) throw new IOException("HTTP header too large");
+        }
+        return buffer.toString("ISO-8859-1");
+    }
+
+    private static int readByte(InputStream input) throws IOException {
+        int value = input.read();
+        if (value == -1) throw new IOException("Unexpected EOF");
+        return value;
+    }
+
+    private static int readUnsignedShort(InputStream input) throws IOException {
+        return (readByte(input) << 8) | readByte(input);
+    }
+
+    private static long readLong(InputStream input) throws IOException {
+        long value = 0;
+        for (int i = 0; i < 8; i++) value = (value << 8) | (readByte(input) & 0xFFL);
+        return value;
+    }
+
+    private static byte[] readExactly(InputStream input, int length) throws IOException {
+        byte[] data = new byte[length];
+        int offset = 0;
+        while (offset < length) {
+            int read = input.read(data, offset, length - offset);
+            if (read == -1) throw new IOException("Unexpected EOF");
+            offset += read;
+        }
+        return data;
+    }
+
+    @Override
+    public void close() {
+        try {
+            if (socket != null) socket.close();
+        } catch (IOException ignored) {
+        }
+        socket = null;
+        input = null;
+        output = null;
+    }
+
+    public static final class WebSocketFrame {
+        public final int opcode;
+        public final byte[] payload;
+
+        WebSocketFrame(int opcode, byte[] payload) {
+            this.opcode = opcode;
+            this.payload = payload;
+        }
+
+        public boolean isClose() {
+            return opcode == 0x8;
+        }
+
+        public boolean isPing() {
+            return opcode == 0x9;
+        }
+
+        public boolean isText() {
+            return opcode == 0x1;
+        }
+    }
+}

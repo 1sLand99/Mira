@@ -1,4 +1,4 @@
-"""Mira 局域网按需远程终端 relay 服务端。"""
+"""Mira 按需远程终端 relay 服务端。"""
 
 from __future__ import annotations
 
@@ -32,56 +32,58 @@ RING_LIMIT = 1024 * 1024
 PROTOCOL_VERSION = 1
 
 INDEX_HTML = """<!doctype html>
-<html lang=\"zh-CN\">
+<html lang="zh-CN">
   <head>
-    <meta charset=\"utf-8\" />
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mira Relay Terminal</title>
-    <link rel=\"stylesheet\" href=\"/vendor/xterm/xterm.css\" />
-    <link rel=\"stylesheet\" href=\"/relay.css\" />
+    <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="/relay.css" />
   </head>
   <body>
-    <main class=\"layout\">
-      <aside class=\"sidebar\">
+    <main class="layout">
+      <aside class="sidebar">
         <header>
           <h1>Mira Relay</h1>
-          <p>局域网按需打开 Android PTY。</p>
+          <p>Android 填写当前 Relay URL 后, 浏览器按需打开真实 PTY。</p>
         </header>
-        <label>Broadcast Target <input id=\"broadcast\" value=\"255.255.255.255\" /></label>
-        <button id=\"scan\">Scan LAN</button>
-        <div id=\"status\" class=\"status\">idle</div>
+        <section class="connect-card">
+          <div class="section-title">Android Relay URL</div>
+          <code id="relayUrl"></code>
+          <p>在 Mira APK 首页填写这个地址, 点击 Connect Relay。</p>
+        </section>
+        <div id="status" class="status">waiting for devices</div>
         <section>
           <h2>Devices</h2>
-          <div id=\"devices\" class=\"devices\"></div>
+          <div id="devices" class="devices"></div>
         </section>
       </aside>
-      <section class=\"terminal-pane\">
-        <div class=\"terminal-toolbar\">
-          <div id=\"sessionTitle\">No session</div>
-          <button id=\"closeSession\" disabled>Close Session</button>
+      <section class="terminal-pane">
+        <div class="terminal-toolbar">
+          <div id="sessionTitle">No session</div>
+          <button id="closeSession" disabled>Close Session</button>
         </div>
-        <div id=\"terminal\" class=\"terminal\"></div>
+        <div id="terminal" class="terminal"></div>
       </section>
     </main>
-    <script src=\"/vendor/xterm/xterm.js\"></script>
-    <script src=\"/vendor/xterm/addon-fit.js\"></script>
-    <script src=\"/relay.js\"></script>
+    <script src="/vendor/xterm/xterm.js"></script>
+    <script src="/vendor/xterm/addon-fit.js"></script>
+    <script src="/relay.js"></script>
   </body>
 </html>
 """
 
-RELAY_CSS = """:root{color-scheme:dark;--bg:#0b1020;--panel:#111827;--line:#263043;--text:#e5e7eb;--muted:#9ca3af;--green:#34d399;--red:#f87171;--yellow:#fbbf24}*{box-sizing:border-box}html,body{height:100%;margin:0}body{background:#070b14;color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}.layout{display:grid;grid-template-columns:340px 1fr;height:100%;gap:0}.sidebar{border-right:1px solid var(--line);background:linear-gradient(180deg,#111827,#0b1020);padding:18px;overflow:auto}.sidebar h1{font-size:22px;margin:0 0 6px}.sidebar p{color:var(--muted);margin:0 0 18px}.sidebar label{display:block;color:var(--muted);font-size:12px;margin:12px 0}.sidebar input{width:100%;margin-top:6px;border:1px solid var(--line);border-radius:10px;background:#05070d;color:var(--text);padding:10px}.sidebar button,.terminal-toolbar button,.device button{border:0;border-radius:10px;background:#2563eb;color:white;padding:10px 12px;cursor:pointer}.sidebar button:disabled,.terminal-toolbar button:disabled,.device button:disabled{background:#374151;color:#9ca3af;cursor:not-allowed}.status{margin-top:12px;color:var(--yellow);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.devices{display:grid;gap:10px}.device{border:1px solid var(--line);border-radius:14px;background:#0f172a;padding:12px}.device-title{font-weight:700}.device-meta{color:var(--muted);font-size:12px;line-height:1.5;margin:6px 0 10px;word-break:break-all}.terminal-pane{display:grid;grid-template-rows:auto 1fr;min-width:0;background:radial-gradient(circle at top left,#111827,#05070d 55%)}.terminal-toolbar{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:12px 16px;background:#0b1020}.terminal{min-height:0;padding:12px}.xterm{height:100%}.ok{color:var(--green)}.bad{color:var(--red)}"""
+RELAY_CSS = """:root{color-scheme:dark;--bg:#0b1020;--panel:#111827;--line:#263043;--text:#e5e7eb;--muted:#9ca3af;--green:#34d399;--red:#f87171;--yellow:#fbbf24}*{box-sizing:border-box}html,body{height:100%;margin:0}body{background:#070b14;color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.layout{display:grid;grid-template-columns:360px 1fr;height:100%;gap:0}.sidebar{border-right:1px solid var(--line);background:linear-gradient(180deg,#111827,#0b1020);padding:18px;overflow:auto}.sidebar h1{font-size:22px;margin:0 0 6px}.sidebar p{color:var(--muted);margin:0 0 18px}.sidebar button,.terminal-toolbar button,.device button{border:0;border-radius:10px;background:#2563eb;color:white;padding:10px 12px;cursor:pointer}.sidebar button:disabled,.terminal-toolbar button:disabled,.device button:disabled{background:#374151;color:#9ca3af;cursor:not-allowed}.connect-card{border:1px solid var(--line);border-radius:14px;background:#0f172a;padding:12px;margin:14px 0}.section-title{font-weight:700;margin-bottom:8px}.connect-card code{display:block;border:1px solid var(--line);border-radius:10px;background:#05070d;color:var(--green);padding:10px;word-break:break-all}.connect-card p{font-size:12px;line-height:1.5;margin:10px 0 0}.status{margin:12px 0;color:var(--yellow);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.devices{display:grid;gap:10px}.device{border:1px solid var(--line);border-radius:14px;background:#0f172a;padding:12px}.device-title{font-weight:700}.device-meta{color:var(--muted);font-size:12px;line-height:1.5;margin:6px 0 10px;word-break:break-all}.terminal-pane{display:grid;grid-template-rows:auto 1fr;min-width:0;background:radial-gradient(circle at top left,#111827,#05070d 55%)}.terminal-toolbar{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:12px 16px;background:#0b1020}.terminal{min-height:0;padding:12px}.xterm{height:100%}.ok{color:var(--green)}.bad{color:var(--red)}"""
 
 RELAY_JS = r"""(() => {
-  const broadcastInput = document.getElementById('broadcast');
-  const scanButton = document.getElementById('scan');
+  const relayUrlEl = document.getElementById('relayUrl');
   const devicesEl = document.getElementById('devices');
   const statusEl = document.getElementById('status');
   const titleEl = document.getElementById('sessionTitle');
   const closeButton = document.getElementById('closeSession');
   const terminalEl = document.getElementById('terminal');
 
-  broadcastInput.value = localStorage.getItem('mira.relay.broadcast') || broadcastInput.value;
+  relayUrlEl.textContent = window.location.origin;
 
   const term = new Terminal({
     cursorBlink: true,
@@ -98,17 +100,12 @@ RELAY_JS = r"""(() => {
   let socket = null;
   let activeSession = null;
   let activeInstallId = null;
+  let refreshTimer = null;
   let resizeTimer = null;
 
   function setStatus(text, ok = false) {
     statusEl.textContent = text;
     statusEl.className = ok ? 'status ok' : 'status';
-  }
-
-  function broadcastTarget() {
-    const value = broadcastInput.value.trim() || '255.255.255.255';
-    localStorage.setItem('mira.relay.broadcast', value);
-    return value;
   }
 
   function bytesToBase64(value) {
@@ -141,19 +138,21 @@ RELAY_JS = r"""(() => {
   function renderDevices(devices) {
     devicesEl.innerHTML = '';
     if (!devices.length) {
-      devicesEl.innerHTML = '<div class="device-meta">No devices discovered.</div>';
+      devicesEl.innerHTML = '<div class="device-meta">No devices connected. Open Mira APK, enter the Relay URL, then tap Connect Relay.</div>';
       return;
     }
     for (const device of devices) {
       const item = document.createElement('div');
       item.className = 'device';
       const shortId = (device.installId || '').slice(0, 8);
+      const online = device.transport === 'control';
       item.innerHTML = `
         <div class="device-title">${device.deviceName || device.model || 'Mira Device'} <span class="device-meta">${shortId}</span></div>
-        <div class="device-meta">${device.model || ''} · ${device.arch || ''}<br>${device.address || ''}<br>${device.state || 'unknown'}</div>
+        <div class="device-meta">${device.model || ''} · ${device.arch || ''}<br>${device.address || ''}<br>${device.state || 'unknown'} · ${online ? 'relay connected' : 'legacy wake'}</div>
       `;
       const open = document.createElement('button');
       open.textContent = 'Open Terminal';
+      open.disabled = device.state === 'offline' || device.state === 'active' || device.state === 'opening';
       open.onclick = () => openTerminal(device);
       item.appendChild(open);
       devicesEl.appendChild(item);
@@ -162,21 +161,9 @@ RELAY_JS = r"""(() => {
 
   async function refreshDevices() {
     const data = await api('/api/devices');
-    renderDevices(data.devices || []);
-  }
-
-  async function scan() {
-    scanButton.disabled = true;
-    setStatus('scanning...');
-    try {
-      const data = await api('/api/discover', { broadcastTarget: broadcastTarget() });
-      renderDevices(data.devices || []);
-      setStatus(`found ${(data.devices || []).length} device(s)`, true);
-    } catch (error) {
-      setStatus(`scan failed: ${error.message}`);
-    } finally {
-      scanButton.disabled = false;
-    }
+    const devices = data.devices || [];
+    renderDevices(devices);
+    if (!activeSession) setStatus(devices.length ? `connected ${devices.length} device(s)` : 'waiting for devices', devices.length > 0);
   }
 
   function wsUrl() {
@@ -209,6 +196,8 @@ RELAY_JS = r"""(() => {
       if (message.type === 'session.close') {
         setStatus('session closed');
         closeButton.disabled = true;
+        activeSession = null;
+        refreshDevices().catch(() => {});
       }
       if (message.type === 'error') term.writeln(`\r\n\x1b[31m${message.error}\x1b[0m`);
     });
@@ -229,8 +218,10 @@ RELAY_JS = r"""(() => {
     if (!activeSession) return;
     await api('/api/close', { sessionId: activeSession }).catch(() => {});
     if (socket) socket.close();
+    activeSession = null;
     closeButton.disabled = true;
     setStatus('session close requested');
+    await refreshDevices().catch(() => {});
   }
 
   function fitAndResize() {
@@ -246,9 +237,10 @@ RELAY_JS = r"""(() => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(fitAndResize, 80);
   });
-  scanButton.addEventListener('click', scan);
   closeButton.addEventListener('click', closeSession);
   refreshDevices().catch(() => {});
+  refreshTimer = setInterval(() => refreshDevices().catch(() => {}), 2000);
+  window.addEventListener('beforeunload', () => clearInterval(refreshTimer));
 })();
 """
 
@@ -265,6 +257,8 @@ class DeviceRecord:
     data: dict[str, Any]
     address: str
     last_seen: float
+    control_writer: asyncio.StreamWriter | None = None
+    control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 @dataclass
@@ -406,6 +400,15 @@ async def broadcast_session(session: RelaySession, message: dict[str, Any]) -> N
         session.browsers.discard(browser)
 
 
+def device_payload(record: DeviceRecord) -> dict[str, Any]:
+    data = dict(record.data)
+    if record.address:
+        data["address"] = record.address
+    if data.get("transport") == "control" and (record.control_writer is None or record.control_writer.is_closing()):
+        data["state"] = "offline"
+    return data
+
+
 async def api_discover(state: RelayState, body: dict[str, Any]) -> bytes:
     target = str(body.get("broadcastTarget") or "255.255.255.255")
     devices = await asyncio.to_thread(scan_lan_blocking, state.advertise_url, target, state.discovery_port, 1.2)
@@ -413,13 +416,19 @@ async def api_discover(state: RelayState, body: dict[str, Any]) -> bytes:
     async with state.lock:
         for device in devices:
             install_id = str(device["installId"])
-            state.devices[install_id] = DeviceRecord(install_id, device, str(device.get("address", "")), now)
-        return json_response("200 OK", {"devices": [record.data for record in state.devices.values()]})
+            record = state.devices.get(install_id)
+            if record is None:
+                state.devices[install_id] = DeviceRecord(install_id, device, str(device.get("address", "")), now)
+            else:
+                record.data.update(device)
+                record.address = str(device.get("address", ""))
+                record.last_seen = now
+        return json_response("200 OK", {"devices": [device_payload(record) for record in state.devices.values()]})
 
 
 async def api_devices(state: RelayState) -> bytes:
     async with state.lock:
-        return json_response("200 OK", {"devices": [record.data for record in state.devices.values()]})
+        return json_response("200 OK", {"devices": [device_payload(record) for record in state.devices.values()]})
 
 
 def post_json(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
@@ -444,6 +453,9 @@ async def api_open(state: RelayState, body: dict[str, Any]) -> bytes:
         session_id = str(uuid.uuid4())
         state.sessions[session_id] = RelaySession(session_id=session_id, install_id=install_id)
         wake_url = str(record.data.get("wakeUrl") or "")
+        control_writer = record.control_writer
+        control_lock = record.control_lock
+        record.data["state"] = "opening"
     payload = {
         "type": "session.open",
         "protocol": PROTOCOL_VERSION,
@@ -453,12 +465,30 @@ async def api_open(state: RelayState, body: dict[str, Any]) -> bytes:
         "cols": int(body.get("cols") or 120),
         "rows": int(body.get("rows") or 36),
     }
-    try:
-        await asyncio.to_thread(post_json, wake_url, payload)
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+    if control_writer is not None and not control_writer.is_closing():
+        try:
+            await send_json(control_writer, control_lock, payload)
+        except Exception as exc:  # noqa: BLE001
+            async with state.lock:
+                state.sessions.pop(session_id, None)
+                if record := state.devices.get(install_id):
+                    record.data["state"] = "idle"
+            return json_response("502 Bad Gateway", {"error": f"control wake failed: {exc}"})
+    elif wake_url:
+        try:
+            await asyncio.to_thread(post_json, wake_url, payload)
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            async with state.lock:
+                state.sessions.pop(session_id, None)
+                if record := state.devices.get(install_id):
+                    record.data["state"] = "idle"
+            return json_response("502 Bad Gateway", {"error": f"wake failed: {exc}"})
+    else:
         async with state.lock:
             state.sessions.pop(session_id, None)
-        return json_response("502 Bad Gateway", {"error": f"wake failed: {exc}"})
+            if record := state.devices.get(install_id):
+                record.data["state"] = "offline"
+        return json_response("409 Conflict", {"error": "device control channel is not connected"})
     print(f"Opened session {session_id} for {install_id}", flush=True)
     return json_response("200 OK", {"sessionId": session_id})
 
@@ -469,10 +499,20 @@ async def close_session(state: RelayState, session_id: str) -> None:
         if not session:
             return
         session.active = False
+        record = state.devices.get(session.install_id)
+        control_writer = record.control_writer if record else None
+        control_lock = record.control_lock if record else None
+        if record:
+            record.data["state"] = "idle"
     message = {"type": "session.close", "sessionId": session_id}
     if session.device_writer is not None:
         try:
             await send_json(session.device_writer, session.device_lock, message)
+        except Exception:
+            pass
+    elif control_writer is not None and control_lock is not None and not control_writer.is_closing():
+        try:
+            await send_json(control_writer, control_lock, message)
         except Exception:
             pass
     await broadcast_session(session, message)
@@ -506,6 +546,9 @@ async def handle_device_ws(state: RelayState, reader: asyncio.StreamReader, writ
                 return
             session.device_writer = writer
             session.device_lock = asyncio.Lock()
+            if record := state.devices.get(install_id):
+                record.data["state"] = "active"
+                record.last_seen = time.time()
         print(f"Device attached session={session_id} installId={install_id}", flush=True)
         await broadcast_session(session, {"type": "session.status", "sessionId": session_id, "state": "active"})
         while True:
@@ -538,7 +581,77 @@ async def handle_device_ws(state: RelayState, reader: asyncio.StreamReader, writ
             if session.device_writer is writer:
                 session.device_writer = None
                 session.active = False
+                async with state.lock:
+                    if record := state.devices.get(session.install_id):
+                        record.data["state"] = "idle"
                 await broadcast_session(session, {"type": "session.status", "sessionId": session.session_id, "state": "device disconnected"})
+        writer.close()
+        await writer.wait_closed()
+
+
+async def handle_control_ws(state: RelayState, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, headers: dict[str, str]) -> None:
+    peer = writer.get_extra_info("peername")
+    print(f"Control websocket from {peer}", flush=True)
+    writer.write(handshake_response(headers))
+    await writer.drain()
+    lock = asyncio.Lock()
+    install_id = ""
+    try:
+        frame = await read_frame(reader)
+        register = json.loads(frame.payload.decode("utf-8"))
+        if register.get("type") != "device.register":
+            await send_json(writer, lock, {"type": "error", "error": "invalid device register"})
+            return
+        install_id = str(register.get("installId") or "")
+        if not install_id:
+            await send_json(writer, lock, {"type": "error", "error": "missing installId"})
+            return
+        address = peer[0] if isinstance(peer, tuple) and peer else ""
+        data = dict(register)
+        data["type"] = "mira.device"
+        data["transport"] = "control"
+        data["address"] = address
+        data["state"] = "idle"
+        data.pop("wakeUrl", None)
+        async with state.lock:
+            record = state.devices.get(install_id)
+            if record is None:
+                record = DeviceRecord(install_id, data, address, time.time())
+                state.devices[install_id] = record
+            else:
+                record.data.update(data)
+                record.address = address
+                record.last_seen = time.time()
+            record.control_writer = writer
+            record.control_lock = lock
+        await send_json(writer, lock, {"type": "control.ready", "protocol": PROTOCOL_VERSION, "installId": install_id})
+        print(f"Device registered installId={install_id} address={address}", flush=True)
+        while True:
+            frame = await read_frame(reader)
+            if frame.is_close:
+                break
+            if frame.is_ping:
+                await send_frame(writer, frame.payload, opcode=0xA, lock=lock)
+                continue
+            if not frame.is_text:
+                continue
+            try:
+                message = json.loads(frame.payload.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if message.get("type") == "device.status":
+                async with state.lock:
+                    if record := state.devices.get(install_id):
+                        record.data["state"] = str(message.get("state") or record.data.get("state") or "idle")
+                        record.last_seen = time.time()
+    except (WebSocketClosed, asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
+        pass
+    finally:
+        async with state.lock:
+            if install_id and (record := state.devices.get(install_id)) and record.control_writer is writer:
+                record.control_writer = None
+                record.data["state"] = "offline"
+                record.last_seen = time.time()
         writer.close()
         await writer.wait_closed()
 
@@ -611,6 +724,9 @@ async def handle_client(state: RelayState, reader: asyncio.StreamReader, writer:
         if path == "/ws/device" and is_upgrade_request(method, headers):
             await handle_device_ws(state, reader, writer, headers)
             return
+        if path == "/ws/control" and is_upgrade_request(method, headers):
+            await handle_control_ws(state, reader, writer, headers)
+            return
         if path == "/ws/browser" and is_upgrade_request(method, headers):
             await handle_browser_ws(state, reader, writer, headers)
             return
@@ -647,7 +763,9 @@ async def run_server(host: str, port: int, discovery_port: int, advertise_url: s
     addresses = ", ".join(str(sock.getsockname()) for sock in server.sockets or [])
     print(f"Mira Relay listening on {addresses}", flush=True)
     print(f"Open {state.advertise_url}", flush=True)
-    print(f"Discovery UDP port {discovery_port}", flush=True)
+    print(f"Android Relay URL {state.advertise_url}", flush=True)
+    print(f"Control WebSocket {state.server_ws_url().replace('/ws/device', '/ws/control')}", flush=True)
+    print(f"Legacy discovery UDP port {discovery_port}", flush=True)
     async with server:
         await server.serve_forever()
 

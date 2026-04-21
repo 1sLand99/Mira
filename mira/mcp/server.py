@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import socket
+import ssl
 import struct
 import sys
 import threading
@@ -68,15 +69,16 @@ class RelayHttpClient:
             raise ToolError("relay returned non-object JSON")
         return value
 
-    def websocket_target(self, path: str) -> tuple[str, int, str]:
+    def websocket_target(self, path: str) -> tuple[str, int, str, bool]:
         parsed = urllib.parse.urlparse(self.relay_url)
-        if parsed.scheme not in {"http", "ws"}:
-            raise ToolError("Mira MCP MVP only supports http:// or ws:// relay URLs")
+        if parsed.scheme not in {"http", "https", "ws", "wss"}:
+            raise ToolError("Mira MCP supports http://, https://, ws:// or wss:// relay URLs")
         host = parsed.hostname
         if not host:
             raise ToolError("relay URL has no host")
-        port = parsed.port or (80 if parsed.scheme in {"http", "ws"} else 443)
-        return host, port, path
+        tls = parsed.scheme in {"https", "wss"}
+        port = parsed.port or (443 if tls else 80)
+        return host, port, path, tls
 
 
 class BrowserWebSocket:
@@ -86,8 +88,10 @@ class BrowserWebSocket:
         self.lock = threading.Lock()
 
     def connect(self) -> None:
-        host, port, path = self.relay.websocket_target("/ws/browser")
+        host, port, path, tls = self.relay.websocket_target("/ws/browser")
         sock = socket.create_connection((host, port), timeout=8.0)
+        if tls:
+            sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
         sock.settimeout(10.0)
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         request = (
@@ -320,9 +324,9 @@ class MiraMcpServer:
             "capabilities": {"tools": {"listChanged": False}, "resources": {"listChanged": False}, "prompts": {"listChanged": False}},
             "serverInfo": {"name": SERVER_NAME, "title": "Mira Remote Android Terminal", "version": SERVER_VERSION},
             "instructions": (
-                "Use Mira tools to discover Android devices, open an on-demand PTY session, run short diagnostic commands, "
+                "Use Mira tools to list connected Android devices, open an on-demand PTY session, run short diagnostic commands, "
                 "read terminal output, and close the session. Prefer mira_run_command for non-interactive analysis. "
-                "Start with mira_discover_devices, then inspect id, uname, getprop, mountinfo, processes, network state, and toolbox metadata. "
+                "Start with mira_list_devices, then inspect id, uname, getprop, mountinfo, processes, network state, and toolbox metadata. "
                 "When the user asks for Magisk risk review, provide only the environment context: Magisk phone, third-party app shell, real PTY, and BusyBox availability."
             ),
         }
@@ -346,7 +350,7 @@ class MiraMcpServer:
             {
                 "name": "mira_discover_devices",
                 "title": "Discover Mira Android devices",
-                "description": "Scan LAN through Mira Relay and return devices that are running Discovery Service.",
+                "description": "Legacy LAN scan helper. In public relay mode, prefer mira_list_devices for devices connected through /ws/control.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {"broadcastTarget": {"type": "string", "description": "Broadcast or device IP target. Defaults to configured target."}},
@@ -355,7 +359,7 @@ class MiraMcpServer:
             {
                 "name": "mira_list_devices",
                 "title": "List known Mira devices",
-                "description": "List devices already known by Mira Relay. Set refresh=true to scan first.",
+                "description": "List devices currently known by Mira Relay, including phones connected through /ws/control.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {"refresh": {"type": "boolean"}, "broadcastTarget": {"type": "string"}},
@@ -549,8 +553,6 @@ class MiraMcpServer:
         if install_id:
             return install_id
         devices = self.relay.request("/api/devices", timeout=10.0).get("devices", [])
-        if not devices:
-            devices = self.tool_discover_devices({}).get("devices", [])
         if len(devices) != 1:
             raise ToolError(f"installId required, known device count={len(devices)}")
         return str(devices[0].get("installId") or "")
@@ -639,7 +641,7 @@ class MiraMcpServer:
 
 ANALYSIS_GUIDE = """# Mira Android 分析指南
 
-1. 先使用 `mira_discover_devices` 获取设备, 再使用 `mira_open_terminal` 或 `mira_run_command` 建立真实 PTY 会话。
+1. 先使用 `mira_list_devices` 获取已连接设备, 再使用 `mira_open_terminal` 或 `mira_run_command` 建立真实 PTY 会话。
 2. 基础上下文命令建议: `/system/bin/id`, `/system/bin/uname -a`, `pwd`, `echo $PREFIX`, `echo $MIRA_BUSYBOX_ABI`, `command -v busybox`。
 3. 文件系统和挂载建议: `/system/bin/cat /proc/self/mountinfo | /system/bin/head -80`, `mount`, `/system/bin/df -h`。
 4. 进程和资源建议: `/system/bin/ps -A`, `top -b -n 1 | head -40`, `/system/bin/cat /proc/meminfo | /system/bin/head -20`。
@@ -664,7 +666,7 @@ MAGISK_CONTEXT = """# Mira Magisk 第三方 app shell 环境上下文
 ANALYSIS_PROMPT = """请通过 Mira MCP 工具对 Android 设备做一次最小终端态势分析。
 
 步骤:
-1. 调用 `mira_discover_devices` 或 `mira_list_devices` 找到目标设备。
+1. 调用 `mira_list_devices` 找到已经连接到 Relay 的目标设备。
 2. 调用 `mira_run_command` 执行 `/system/bin/id; /system/bin/uname -a; pwd; echo $PREFIX; echo $MIRA_BUSYBOX_ABI; command -v busybox`。
 3. 优先调用 `mira_collect_snapshot` 获取第一轮证据。
 4. 如需补充, 继续采集 `getprop ro.product.model; getprop ro.build.version.sdk; getprop ro.product.cpu.abilist`。

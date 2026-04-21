@@ -2,30 +2,67 @@
 
 ## 目标
 
-Remote On-Demand Terminal(按需远程终端) 把 Mira 从设备内 WebView(网页视图) 终端扩展为局域网可发现, 服务端按需唤起, 浏览器远程控制 Android PTY(安卓伪终端) 的工作台。
+Remote On-Demand Terminal(按需远程终端) 现在采用手机主动连接 Relay Server(中继服务端) 的模式。
 
-本阶段只做局域网 MVP(最小可行产品):
+主路径不再依赖 Scan LAN(局域网扫描), 也不做二维码扫码。电脑启动 Relay 后生成一个 URL, Android App(安卓应用) 首页只需要填写这个 URL 并点击 Connect Relay(连接中继)。浏览器只有在用户点击 Open Terminal(打开终端) 后才会触发手机创建 PTY(伪终端)。
 
-1. Android App(安卓应用) 平时只运行轻量 Discovery Service(发现服务)。
-2. 服务端扫描局域网发现设备。
-3. 用户点击 Open Terminal(打开终端) 后, 服务端请求设备打开 session(会话)。
-4. 设备释放内置 BusyBox(单文件工具集) 到临时 session 工具目录。
-5. 设备创建真实 PTY 并主动连接服务端 WebSocket(网页长连接协议)。
-6. 浏览器通过服务端控制同一个手机 shell(命令解释器)。
+本阶段继续保持最小闭环:
 
-本阶段不使用 Pairing Token(配对令牌) 或共享口令。企业自托管时默认由自己的 Relay Server(中继服务端) 控制入口, 协议只保留设备身份和会话绑定字段。
+1. Android 只维护轻量 control WebSocket(控制长连接), 不提前创建 PTY。
+2. 浏览器打开 Relay 页面, 自动看到已经连接的设备。
+3. 用户点击 Open Terminal 后, Relay 通过 control 通道下发 session.open。
+4. Android 创建真实 PTY, 启动 shell(命令解释器), 再连接 `/ws/device`。
+5. 浏览器连接 `/ws/browser`, 输入和输出都经过 Relay 转发。
+6. Close Session 后关闭 PTY 和 device WebSocket, control 通道继续保持 idle(空闲) 状态。
 
-## 启动服务端
+## 一键公网启动
+
+本机需要安装 cloudflared(Cloudflare 隧道命令行):
+
+```bash
+brew install cloudflare/cloudflare/cloudflared
+```
+
+启动:
+
+```bash
+./tools/relay/start-public-relay.sh
+```
+
+脚本会自动:
+
+1. 启动 Cloudflare Quick Tunnel(随机公网隧道)。
+2. 拿到随机 `https://*.trycloudflare.com` 地址。
+3. 用这个地址启动 Mira Relay。
+4. 打印 Browser URL 和 Android Relay URL。
+
+手机端填写脚本打印的 Android Relay URL, 不需要 Scan LAN, 不需要二维码。
+
+可选环境变量:
+
+```bash
+MIRA_RELAY_PORT=8765 ./tools/relay/start-public-relay.sh
+MIRA_RELAY_HOST=127.0.0.1 ./tools/relay/start-public-relay.sh
+```
+
+## 局域网启动
+
+如果只在局域网测试, 可以直接启动 Relay:
 
 ```bash
 python3 -m mira.relay.server \
   --host 0.0.0.0 \
   --port 8765 \
-  --discovery-port 8766 \
   --advertise-url http://<电脑局域网IP>:8765
 ```
 
 浏览器打开:
+
+```text
+http://<电脑局域网IP>:8765
+```
+
+手机端填写同一个地址:
 
 ```text
 http://<电脑局域网IP>:8765
@@ -37,32 +74,29 @@ http://<电脑局域网IP>:8765
 2. 首页填写:
    ```text
    Device Name: 任意名称
-   Discovery Port: 8766
+   Relay URL: Relay 页面显示的地址
    ```
-3. 点击 `Start Discovery`。
-4. 回到浏览器点击 `Scan LAN`。
-5. 发现设备后点击 `Open Terminal`。
+3. 点击 `Connect Relay`。
+4. 浏览器设备列表出现手机后, 点击 `Open Terminal`。
+5. 需要退出时点击 `Close Session`, 或在手机上点击 `Disconnect`。
+
+`Local Terminal` 仍然保留, 用于设备内 WebView(网页视图) 本地闭环。
 
 ## 协议概览
 
-### UDP 发现
+### 设备注册
 
-服务端广播:
+Android 连接:
 
-```json
-{
-  "type": "mira.discover",
-  "protocol": 1,
-  "serverUrl": "http://192.168.1.10:8765",
-  "nonce": "random"
-}
+```text
+/ws/control
 ```
 
-设备响应:
+首帧发送:
 
 ```json
 {
-  "type": "mira.device",
+  "type": "device.register",
   "protocol": 1,
   "installId": "uuid",
   "deviceName": "Pixel 4",
@@ -72,13 +106,19 @@ http://<电脑局域网IP>:8765
   "sdk": 30,
   "arch": "arm64-v8a",
   "state": "idle",
-  "wakeUrl": "http://192.168.1.23:39091/session/open"
+  "transport": "control"
 }
 ```
 
-### 按需唤起
+服务端回复:
 
-服务端 POST 到设备 `wakeUrl`:
+```json
+{"type":"control.ready","protocol":1,"installId":"uuid"}
+```
+
+### 按需打开终端
+
+浏览器点击 Open Terminal 后, Relay 通过 `/ws/control` 发给 Android:
 
 ```json
 {
@@ -86,19 +126,19 @@ http://<电脑局域网IP>:8765
   "protocol": 1,
   "installId": "uuid",
   "sessionId": "server-generated-uuid",
-  "serverWs": "ws://192.168.1.10:8765/ws/device",
+  "serverWs": "wss://example.trycloudflare.com/ws/device",
   "cols": 120,
   "rows": 36
 }
 ```
 
-设备创建 PTY 后连接服务端:
+Android 创建 PTY 后连接 `/ws/device`:
 
 ```json
 {"type":"device.attach","protocol":1,"installId":"uuid","sessionId":"uuid"}
 ```
 
-浏览器连接服务端:
+浏览器连接 `/ws/browser`:
 
 ```json
 {"type":"browser.attach","protocol":1,"installId":"uuid","sessionId":"uuid"}
@@ -113,9 +153,9 @@ http://<电脑局域网IP>:8765
 {"type":"session.close","sessionId":"uuid"}
 ```
 
-### 会话工具箱
+## 会话工具箱
 
-设备收到 wake 请求后会在创建 PTY 前准备 Mira Toolbox(工具箱):
+设备收到 session.open 后会在创建 PTY 前准备 Mira Toolbox(工具箱):
 
 ```text
 /data/user/0/com.vwww.mira/cache/mira-sessions/<sessionId>/bin/busybox
@@ -161,13 +201,14 @@ cat /proc/self/mountinfo | head
 
 1. 输出来自手机真实 PTY。
 2. 浏览器刷新后可以回放最近 1 MiB session 输出。
-3. Close Session 后设备断开 WebSocket 并关闭 PTY, Discovery Service 回到 idle。
-4. `busybox` 来自 `cache/mira-sessions/<sessionId>/bin`。
+3. Close Session 后设备断开 `/ws/device` 并关闭 PTY。
+4. `/ws/control` 保持连接, 设备状态回到 idle。
+5. `busybox` 来自 `cache/mira-sessions/<sessionId>/bin`。
 
 ## 当前边界
 
-1. 只支持 `ws://`, 不支持 `wss://`。
-2. 只保证局域网可用, 公网需要 TLS 和 Push 唤醒。
+1. 不做 Scan LAN 主路径, 旧 `/api/discover` 只作为兼容兜底保留。
+2. 不做二维码扫码。
 3. 每台设备同一时间只允许一个 active session。
 4. 不实现 apt(包管理器), AI Agent(智能体) 自动执行或服务端动态工具包下发。
 5. 本阶段不使用共享令牌, 默认依赖企业自部署服务端边界。后续企业认证可接账号, 证书或 HMAC。

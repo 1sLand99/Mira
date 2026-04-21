@@ -1,0 +1,147 @@
+package com.vwww.mira;
+
+import android.content.Context;
+import android.util.Log;
+
+import org.json.JSONObject;
+
+import java.io.Closeable;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+public final class MiraControlClient implements Closeable {
+    public interface Callback {
+        void onControlMessage(JSONObject message);
+        void onControlStatus(String status);
+    }
+
+    public interface StateProvider {
+        String currentState();
+    }
+
+    private static final String TAG = "MiraControlClient";
+
+    private final Context context;
+    private final MiraIdentity identity;
+    private final String deviceName;
+    private final String relayUrl;
+    private final StateProvider stateProvider;
+    private final Callback callback;
+    private final AtomicBoolean running = new AtomicBoolean(false);
+
+    private MiraWebSocketConnection websocket;
+    private Thread workerThread;
+
+    public MiraControlClient(
+        Context context,
+        MiraIdentity identity,
+        String deviceName,
+        String relayUrl,
+        StateProvider stateProvider,
+        Callback callback
+    ) {
+        this.context = context.getApplicationContext();
+        this.identity = identity;
+        this.deviceName = deviceName;
+        this.relayUrl = relayUrl;
+        this.stateProvider = stateProvider;
+        this.callback = callback;
+    }
+
+    public void start() {
+        if (!running.compareAndSet(false, true)) return;
+        workerThread = new Thread(this::runLoop, "MiraControlClient");
+        workerThread.start();
+    }
+
+    private void runLoop() {
+        while (running.get()) {
+            try {
+                String controlWs = controlWsUrl(relayUrl);
+                websocket = MiraWebSocketConnection.connect(controlWs);
+                websocket.sendJson(registerMessage());
+                notifyStatus("control connected");
+                readControlLoop();
+            } catch (Throwable throwable) {
+                if (running.get()) {
+                    Log.w(TAG, "Control channel failed", throwable);
+                    notifyStatus("control disconnected: " + throwable.getMessage());
+                    sleepQuietly(2000);
+                }
+            } finally {
+                closeSocketOnly();
+            }
+        }
+    }
+
+    private void readControlLoop() throws Exception {
+        while (running.get() && websocket != null) {
+            MiraWebSocketConnection.WebSocketFrame frame = websocket.readFrame();
+            if (frame.isClose()) break;
+            if (frame.isPing()) {
+                websocket.sendPong(frame.payload);
+                continue;
+            }
+            if (!frame.isText()) continue;
+            JSONObject message = new JSONObject(new String(frame.payload, StandardCharsets.UTF_8));
+            String type = message.optString("type", "");
+            if ("control.ready".equals(type)) {
+                notifyStatus("control ready");
+                continue;
+            }
+            if (callback != null) callback.onControlMessage(message);
+        }
+    }
+
+    private JSONObject registerMessage() throws Exception {
+        JSONObject json = identity.deviceMeta(deviceName, stateProvider == null ? "idle" : stateProvider.currentState(), "");
+        json.put("type", "device.register");
+        json.put("transport", "control");
+        return json;
+    }
+
+    private String controlWsUrl(String value) throws Exception {
+        String raw = value == null ? "" : value.trim();
+        if (raw.isEmpty()) throw new IllegalArgumentException("Relay URL is empty");
+        if (!raw.contains("://")) raw = "https://" + raw;
+        URI uri = new URI(raw);
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if ("http".equals(scheme)) scheme = "ws";
+        else if ("https".equals(scheme)) scheme = "wss";
+        else if (!"ws".equals(scheme) && !"wss".equals(scheme)) throw new IllegalArgumentException("Unsupported Relay URL scheme");
+        String authority = uri.getRawAuthority();
+        if (authority == null || authority.trim().isEmpty()) throw new IllegalArgumentException("Relay URL host is empty");
+        String path = uri.getRawPath();
+        if (path == null || path.isEmpty() || "/".equals(path)) path = "/ws/control";
+        else if (!path.endsWith("/ws/control")) path = path.replaceAll("/+$", "") + "/ws/control";
+        return scheme + "://" + authority + path;
+    }
+
+    private void notifyStatus(String status) {
+        Log.i(TAG, status);
+        if (callback != null) callback.onControlStatus(status);
+    }
+
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void closeSocketOnly() {
+        if (websocket != null) {
+            websocket.close();
+            websocket = null;
+        }
+    }
+
+    @Override
+    public void close() {
+        running.set(false);
+        closeSocketOnly();
+    }
+}

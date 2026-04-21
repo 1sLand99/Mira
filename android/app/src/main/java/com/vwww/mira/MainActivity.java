@@ -20,13 +20,13 @@ import android.widget.TextView;
 public final class MainActivity extends Activity {
     private static final String PREFS = "mira_ui";
     private static final String KEY_DEVICE_NAME = "device_name";
-    private static final String KEY_DISCOVERY_PORT = "discovery_port";
+    private static final String KEY_RELAY_URL = "relay_url";
 
     private MiraTerminalServer server;
     private WebView webView;
     private MiraIdentity identity;
     private EditText deviceNameInput;
-    private EditText discoveryPortInput;
+    private EditText relayUrlInput;
     private TextView statusView;
 
     @Override
@@ -56,18 +56,18 @@ public final class MainActivity extends Activity {
         root.addView(identityView);
 
         deviceNameInput = input("Device Name", preferences.getString(KEY_DEVICE_NAME, identity.defaultDeviceName()));
-        discoveryPortInput = input("Discovery Port", preferences.getString(KEY_DISCOVERY_PORT, "8766"));
+        relayUrlInput = input("Relay URL", preferences.getString(KEY_RELAY_URL, ""));
         root.addView(deviceNameInput);
-        root.addView(discoveryPortInput);
+        root.addView(relayUrlInput);
 
         Button start = new Button(this);
-        start.setText("Start Discovery");
-        start.setOnClickListener(view -> startDiscovery());
+        start.setText("Connect Relay");
+        start.setOnClickListener(view -> connectRelay());
         root.addView(start);
 
         Button stop = new Button(this);
-        stop.setText("Stop Discovery");
-        stop.setOnClickListener(view -> stopDiscovery());
+        stop.setText("Disconnect");
+        stop.setOnClickListener(view -> disconnectRelay());
         root.addView(stop);
 
         Button local = new Button(this);
@@ -76,7 +76,7 @@ public final class MainActivity extends Activity {
         root.addView(local);
 
         statusView = new TextView(this);
-        statusView.setText("Idle. Start discovery, then scan from Mira Relay server.");
+        statusView.setText("Idle. Fill the Relay URL from Mira Relay page, then tap Connect Relay.");
         statusView.setPadding(0, 24, 0, 0);
         root.addView(statusView);
 
@@ -92,33 +92,32 @@ public final class MainActivity extends Activity {
         return editText;
     }
 
-    private void startDiscovery() {
+    private void connectRelay() {
         String deviceName = deviceNameInput.getText().toString().trim();
-        String portText = discoveryPortInput.getText().toString().trim();
-        int port = 8766;
-        try {
-            port = Integer.parseInt(portText);
-        } catch (NumberFormatException ignored) {
+        String relayUrl = relayUrlInput.getText().toString().trim();
+        if (relayUrl.isEmpty()) {
+            statusView.setText("Relay URL is required.");
+            return;
         }
         getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_DEVICE_NAME, deviceName)
-            .putString(KEY_DISCOVERY_PORT, String.valueOf(port))
+            .putString(KEY_RELAY_URL, relayUrl)
             .apply();
 
         Intent intent = new Intent(this, MiraDiscoveryService.class);
         intent.setAction(MiraDiscoveryService.ACTION_START);
         intent.putExtra(MiraDiscoveryService.EXTRA_DEVICE_NAME, deviceName);
-        intent.putExtra(MiraDiscoveryService.EXTRA_DISCOVERY_PORT, port);
+        intent.putExtra(MiraDiscoveryService.EXTRA_RELAY_URL, relayUrl);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent);
         else startService(intent);
-        statusView.setText("Discovery running on UDP port " + port + ". Scan from Mira Relay server.");
+        statusView.setText("Relay connecting. Keep this service running, then open terminal from browser.");
     }
 
-    private void stopDiscovery() {
+    private void disconnectRelay() {
         Intent intent = new Intent(this, MiraDiscoveryService.class);
         intent.setAction(MiraDiscoveryService.ACTION_STOP);
         startService(intent);
-        statusView.setText("Discovery stopped.");
+        statusView.setText("Relay disconnected.");
     }
 
     private void startLocalTerminal() {
