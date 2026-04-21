@@ -192,7 +192,8 @@ manifest = {
         'source': source_url,
         'buildScript': 'tools/toolbox/build-busybox-android.sh',
         'appletsAsset': 'toolbox/applets.txt',
-        'installedApplets': applets,
+        'runtimeInstallMode': 'requested applets filtered by busybox --list',
+        'requestedApplets': applets,
         'abis': abis,
     },
 }

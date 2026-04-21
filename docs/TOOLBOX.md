@@ -71,7 +71,8 @@ Open Terminal
   -> MiraToolbox.prepare(sessionId)
   -> 按设备 ABI 选择 BusyBox 资产
   -> /data/user/0/com.vwww.mira/cache/mira-sessions/<sessionId>/bin/busybox
-  -> 读取 applets.txt 创建常用 applet(命令入口) symlink(符号链接)
+  -> 执行 busybox --list 获取真实支持的 applet(子命令)
+  -> 读取 applets.txt 并只为真实支持的 applet 创建 symlink(符号链接)
   -> 复制 manifest.json 到 session 根目录
   -> MiraPtyFactory 把 session bin 放到 PATH 前面
   -> 创建 PTY(伪终端)
@@ -104,6 +105,8 @@ ls /proc/self | head -3
 ```
 
 预期 `busybox` 和 `ls` 都来自 `cache/mira-sessions/<sessionId>/bin`。
+
+如果 `applets.txt` 里请求了当前 BusyBox 二进制不支持的命令, Mira 不会创建对应入口, 避免遮蔽 Android 系统自带命令。例如当前二进制不支持 `stat`, 因此 `stat` 会继续走 `/system/bin/stat`。
 
 ## 当前边界
 

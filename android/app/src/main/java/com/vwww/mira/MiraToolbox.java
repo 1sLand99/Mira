@@ -16,8 +16,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public final class MiraToolbox implements Closeable {
     private static final String TAG = "MiraToolbox";
@@ -60,7 +62,9 @@ public final class MiraToolbox implements Closeable {
         File busyboxFile = new File(binDir, "busybox");
         copyAsset(appContext.getAssets(), asset.assetPath, busyboxFile);
         chmodExecutable(busyboxFile);
-        installApplets(busyboxFile, binDir, loadApplets(appContext.getAssets()));
+        List<String> requestedApplets = loadApplets(appContext.getAssets());
+        Set<String> supportedApplets = queryBusyBoxApplets(busyboxFile);
+        installApplets(busyboxFile, binDir, requestedApplets, supportedApplets);
 
         File manifestFile = new File(sessionRoot, "toolbox-manifest.json");
         copyAsset(appContext.getAssets(), MANIFEST_ASSET, manifestFile);
@@ -94,8 +98,12 @@ public final class MiraToolbox implements Closeable {
         deleteRecursively(sessionDir);
     }
 
-    private static void installApplets(File busyboxFile, File binDir, List<String> applets) throws IOException {
+    private static void installApplets(File busyboxFile, File binDir, List<String> applets, Set<String> supportedApplets) throws IOException {
         for (String applet : applets) {
+            if (!supportedApplets.contains(applet)) {
+                Log.i(TAG, "Skip unsupported busybox applet " + applet);
+                continue;
+            }
             File link = new File(binDir, applet);
             if (link.exists() && !link.delete()) throw new IOException("无法替换 applet: " + link.getAbsolutePath());
             try {
@@ -104,6 +112,29 @@ public final class MiraToolbox implements Closeable {
                 writeWrapper(link, busyboxFile, applet);
             }
         }
+    }
+
+    private static Set<String> queryBusyBoxApplets(File busyboxFile) throws IOException {
+        Process process = new ProcessBuilder(busyboxFile.getAbsolutePath(), "--list")
+            .redirectErrorStream(true)
+            .start();
+        Set<String> applets = new HashSet<>();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String applet = line.trim();
+                if (!applet.isEmpty()) applets.add(applet);
+            }
+        }
+        try {
+            int exitCode = process.waitFor();
+            if (exitCode != 0) throw new IOException("busybox --list failed with exit code " + exitCode);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("busybox --list interrupted", interrupted);
+        }
+        if (applets.isEmpty()) throw new IOException("busybox --list returned no applets");
+        return applets;
     }
 
     private static BusyBoxAsset selectBusyBoxAsset(AssetManager assets) throws IOException {

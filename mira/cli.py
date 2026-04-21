@@ -217,6 +217,19 @@ class TerminalSession:
                     raise CliError(f"timeout waiting for marker: {pattern}")
                 self.lock.wait(min(remaining, 0.25))
 
+    def wait_active(self, timeout: float = 10.0) -> None:
+        deadline = time.monotonic() + timeout
+        with self.lock:
+            while True:
+                if self.status == "active":
+                    return
+                if not self.active:
+                    raise CliError(f"session is not active: {self.status}")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise CliError(f"timeout waiting for active session: {self.status}")
+                self.lock.wait(min(remaining, 0.25))
+
     def close(self) -> None:
         self.active = False
         try:
@@ -326,6 +339,7 @@ def command_devices(relay: RelayHttpClient, as_json: bool) -> int:
 def command_run(relay: RelayHttpClient, args: argparse.Namespace) -> int:
     session = open_session(relay, args.install_id, args.cols, args.rows)
     session.start_reader(echo=False)
+    session.wait_active(timeout=min(args.timeout, 10.0))
     marker = f"__MIRA_CLI_DONE_{uuid.uuid4().hex}__"
     before = len(session.buffer)
     session.send_text(args.command.rstrip("\n") + "\nprintf '\\n%s:%s\\n' " + shlex.quote(marker) + " \"$?\"\n")
@@ -346,7 +360,7 @@ def command_shell(relay: RelayHttpClient, args: argparse.Namespace) -> int:
     cols, rows = terminal_size()
     session = open_session(relay, args.install_id, cols, rows)
     session.start_reader(echo=True)
-    time.sleep(0.15)
+    session.wait_active(timeout=10.0)
 
     stdin_fd = sys.stdin.fileno()
     old_attrs = termios.tcgetattr(stdin_fd) if sys.stdin.isatty() else None

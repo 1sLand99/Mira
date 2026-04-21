@@ -9,7 +9,8 @@
     "source": "https://busybox.net/downloads/busybox-1.37.0.tar.bz2",
     "buildScript": "tools/toolbox/build-busybox-android.sh",
     "appletsAsset": "toolbox/applets.txt",
-    "installedApplets": [
+    "runtimeInstallMode": "requested applets filtered by busybox --list",
+    "requestedApplets": [
       "awk",
       "base64",
       "basename",
