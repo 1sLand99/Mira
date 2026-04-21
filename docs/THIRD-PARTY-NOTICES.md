@@ -3,10 +3,11 @@
 ## BusyBox
 
 - Name: BusyBox
-- Version: 1.37.0
+- Version: LAMDA v9.25 busybox assets
 - License: GPL-2.0
-- Source: https://busybox.net/downloads/busybox-1.37.0.tar.bz2
-- Build script: `tools/toolbox/build-busybox-android.sh`
+- Source: https://github.com/firerpa/lamda/releases/tag/v9.25
+- Download script: `tools/toolbox/download-lamda-busybox.sh`
+- Self build experiment script: `tools/toolbox/build-busybox-android.sh`
 - Manifest: `android/app/src/main/assets/toolbox/manifest.json`
 - Packaged assets:
   - `android/app/src/main/assets/toolbox/busybox/arm64-v8a/busybox`

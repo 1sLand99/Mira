@@ -1,7 +1,8 @@
-BusyBox 1.37.0
+LAMDA BusyBox v9.25
 ABI: x86_64
 License: GPL-2.0
-Source: https://busybox.net/downloads/busybox-1.37.0.tar.bz2
-Build script: tools/toolbox/build-busybox-android.sh
+Release: https://github.com/firerpa/lamda/releases/tag/v9.25
+Upstream asset: https://github.com/firerpa/lamda/releases/download/v9.25/busybox-x86_64
+Download script: tools/toolbox/download-lamda-busybox.sh
 Asset: toolbox/busybox/x86_64/busybox
-SHA256: 95835989e94f0907e69a3c1fd23e6840af629d5fbb8c0cf34731f0d7c644ac29
+SHA256: d2f9ec61c8052492c6c087ca165ec08c25e7e422cd6ae0b2604a2e93a298f021

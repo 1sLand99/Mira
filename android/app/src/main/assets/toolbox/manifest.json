@@ -4,36 +4,40 @@
   "packaging": "apk-assets",
   "releaseMode": "per-session-cache",
   "busybox": {
-    "version": "1.37.0",
+    "version": "lamda-v9.25",
     "license": "GPL-2.0",
-    "source": "https://busybox.net/downloads/busybox-1.37.0.tar.bz2",
-    "buildScript": "tools/toolbox/build-busybox-android.sh",
+    "source": "https://github.com/firerpa/lamda/releases/tag/v9.25",
+    "downloadScript": "tools/toolbox/download-lamda-busybox.sh",
     "runtimeInstallMode": "all applets from busybox --list",
     "installedAppletsSource": "runtime busybox --list",
     "abis": [
       {
         "abi": "arm64-v8a",
         "asset": "toolbox/busybox/arm64-v8a/busybox",
-        "sha256": "cb2ea339701214e8c2c28f29f27f490fcc53cb21789b16504ec241b550a05afe",
-        "sizeBytes": 809128
+        "upstreamAsset": "https://github.com/firerpa/lamda/releases/download/v9.25/busybox-arm64-v8a",
+        "sha256": "befe862190b8d71cbdf5760359b191bb2331fb40290892e31f383bf9ecbd5530",
+        "sizeBytes": 1342824
       },
       {
         "abi": "armeabi-v7a",
         "asset": "toolbox/busybox/armeabi-v7a/busybox",
-        "sha256": "251e2b099a59d0e93ddfccb6f7597d096f7902c7c674d29036c7ab6cafdfe8e3",
-        "sizeBytes": 855108
+        "upstreamAsset": "https://github.com/firerpa/lamda/releases/download/v9.25/busybox-armeabi-v7a",
+        "sha256": "00dcbac04f15bbdf26e8cb5cb4c884c073b82774e06a2e1c66a16e894d2f617a",
+        "sizeBytes": 1001940
       },
       {
         "abi": "x86",
         "asset": "toolbox/busybox/x86/busybox",
-        "sha256": "4338e8a03ea59ab391a659d76c627b0091683fee97f1171ddeac00452f94f0ca",
-        "sizeBytes": 841232
+        "upstreamAsset": "https://github.com/firerpa/lamda/releases/download/v9.25/busybox-x86",
+        "sha256": "33c7df56de8a1b7462c73ee706ccd2e4ed6a0575cd38c46eecd6f0aa7f81d541",
+        "sizeBytes": 1525984
       },
       {
         "abi": "x86_64",
         "asset": "toolbox/busybox/x86_64/busybox",
-        "sha256": "95835989e94f0907e69a3c1fd23e6840af629d5fbb8c0cf34731f0d7c644ac29",
-        "sizeBytes": 803096
+        "upstreamAsset": "https://github.com/firerpa/lamda/releases/download/v9.25/busybox-x86_64",
+        "sha256": "d2f9ec61c8052492c6c087ca165ec08c25e7e422cd6ae0b2604a2e93a298f021",
+        "sizeBytes": 1523248
       }
     ]
   }
