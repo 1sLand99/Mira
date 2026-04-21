@@ -1,0 +1,23 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "Mira"
+
+include ":mira-app"
+include ":terminal-emulator"
+
+project(":mira-app").projectDir = file("android/app")
+project(":terminal-emulator").projectDir = file("third_party/termux-app/terminal-emulator")

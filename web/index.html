@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mira Web Terminal</title>
+    <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell-page">
+      <header class="topbar">
+        <div>
+          <h1>Mira Web Terminal</h1>
+          <p>浏览器连接服务端 PTY, 实时操作同一个 shell。</p>
+        </div>
+        <div id="status" class="status status-waiting">connecting</div>
+      </header>
+      <section id="terminal" class="terminal" aria-label="Mira Web Terminal"></section>
+    </main>
+
+    <script src="/vendor/xterm/xterm.js"></script>
+    <script src="/vendor/xterm/addon-fit.js"></script>
+    <script src="/main.js"></script>
+  </body>
+</html>

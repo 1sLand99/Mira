@@ -1,0 +1,9 @@
+<resources>
+    <style name="MiraTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#05070d</item>
+        <item name="android:navigationBarColor">#05070d</item>
+    </style>
+</resources>

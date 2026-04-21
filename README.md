@@ -187,6 +187,156 @@ Mira 默认运行在 Termux 环境中, 看到的是 Termux 权限和系统可见
 5. 增加 Playbook 自动沉淀能力。
 6. 增加服务端任务编排和历史检索。
 
+## Android APK MVP
+
+Mira 当前主线已经切到 Android APK(安卓安装包) 形态, 目标是在 Mira 自己的第三方应用沙盒里持有真实 PTY(伪终端), 再通过 Web Terminal(网页终端) 操作 shell(命令解释器)。
+
+当前闭环复用 Termux app(安卓终端应用) 的 `terminal-emulator` 模块作为 submodule(代码子模块), 并通过 JNI(本地接口) 创建 PTY 子进程。Mira 还会创建最小 bootstrap(启动用户空间), 让 shell 从 `/data/user/0/com.vwww.mira/files/usr/bin/sh` 进入。
+
+### 构建 APK
+
+```bash
+./gradlew :mira-app:assembleDebug
+```
+
+产物位置:
+
+```text
+android/app/build/outputs/apk/debug/mira-app-debug.apk
+```
+
+### 安装并启动
+
+```bash
+adb install -r android/app/build/outputs/apk/debug/mira-app-debug.apk
+adb shell am start -n com.vwww.mira/.MainActivity
+```
+
+Mira APK 内部会启动随机本地端口, 并带一次性 token(访问令牌) 加载 WebView(网页视图)。端口和令牌不会写死在代码里。
+
+如果要从电脑浏览器访问设备内 Web Terminal, 可以用 adb forward(安卓调试桥端口转发):
+
+```bash
+adb logcat -d -s Mira:I
+adb forward tcp:8765 tcp:<device_port>
+open "http://127.0.0.1:8765/?token=<token>"
+```
+
+其中 `<device_port>` 和 `<token>` 来自日志里的:
+
+```text
+Mira Web Terminal listening on http://127.0.0.1:<device_port>/?token=<token>
+```
+
+服务端会允许带正确 token 的 localhost(本机地址) 来源, 因此电脑浏览器通过 `127.0.0.1:8765` 访问不会因为设备内随机端口不同而被拒绝。
+
+当前 shell 路径和工作目录是:
+
+```text
+/data/user/0/com.vwww.mira/files/usr/bin/sh
+/data/user/0/com.vwww.mira/files/home
+```
+
+### 当前 Android 数据流
+
+```mermaid
+sequenceDiagram
+  participant APK as Mira APK(安卓安装包)
+  participant WV as WebView(网页视图)
+  participant WS as WebSocket(网页长连接协议)
+  participant Server as Local Server(本地服务)
+  participant JNI as Termux JNI(本地接口)
+  participant PTY as PTY(伪终端)
+  participant Shell as files/usr/bin/sh
+
+  APK->>Server: 启动 127.0.0.1 随机端口
+  APK->>WV: 加载 Web Terminal 页面
+  WV->>WS: 连接 /ws/terminal
+  WS->>Server: 发送 input(输入) 和 resize(尺寸变更)
+  Server->>JNI: createSubprocess 创建 PTY 子进程
+  JNI->>PTY: 持有 PTY master(伪终端主端)
+  PTY->>Shell: shell 运行在 Mira 私有沙盒
+  Shell->>PTY: 输出字节流
+  PTY->>Server: 读取输出
+  Server->>WV: WebSocket 二进制帧回传
+```
+
+详细说明见 `docs/ANDROID-MVP.md`。
+
+### Termux fork 路线
+
+仓库已经加入 Termux fork(分叉)辅助路线:
+
+1. `third_party/termux-app`: 复用 Termux APK 和终端能力源码。
+2. `third_party/termux-packages`: 用新 package(包名) 重编 bootstrap。
+3. `tools/termux/prepare-mira-termux-packages.sh`: 生成 Mira bootstrap 构建工作区。
+4. `tools/termux/prepare-mira-termux-app.sh`: 生成改名后的 Termux app 工作区。
+
+完整说明见 `docs/TERMUX-FORK.md`。
+
+## Web Terminal MVP 运行说明
+
+本轮 MVP(最小可行产品) 只实现 Web Terminal(网页终端) 到 PTY(伪终端) 的实时连接, 不实现 Probe(检测探针), Report(风险报告), Agent(智能体) 分析或多设备管理。
+
+### 启动服务端
+
+```bash
+python3 -m mira.bridge.server --host 127.0.0.1 --port 8765
+```
+
+启动后打开:
+
+```text
+http://127.0.0.1:8765/
+```
+
+浏览器页面会通过 WebSocket(网页长连接协议) 连接 `/ws/terminal`, 服务端创建一个真实 shell(命令解释器) 并挂到 PTY 上。前端 xterm.js(浏览器终端组件) 已随仓库放在 `web/vendor/xterm/`, 不依赖外部 CDN(内容分发网络)。
+
+### 验收命令
+
+在网页终端中输入:
+
+```bash
+pwd
+ls
+echo hello
+```
+
+预期结果:
+
+1. 命令输出实时显示在浏览器里。
+2. 多条命令运行在同一个持久 PTY session(终端会话) 中, 不是一次性 exec(命令执行) stdout(标准输出)。
+3. 调整浏览器窗口后, 前端会把 cols/rows(列数/行数) 同步给服务端 PTY。
+
+### 数据流
+
+```mermaid
+sequenceDiagram
+  participant Browser as Browser(浏览器)
+  participant Xterm as xterm.js(浏览器终端组件)
+  participant WS as WebSocket(网页长连接协议)
+  participant Server as Mira Bridge(连接层服务端)
+  participant PTY as PTY master(伪终端主端)
+  participant Shell as shell(命令解释器)
+
+  Browser->>Xterm: 用户输入键盘内容
+  Xterm->>WS: 发送 input(输入) 消息
+  WS->>Server: 转发输入字节
+  Server->>PTY: 写入 PTY master
+  PTY->>Shell: shell 从 PTY slave(伪终端从端) 读取
+  Shell->>PTY: 输出写回 PTY slave
+  PTY->>Server: 服务端读取 PTY master
+  Server->>WS: 发送二进制输出帧
+  WS->>Xterm: 写入终端显示
+  Browser->>Xterm: 窗口尺寸变化
+  Xterm->>Server: 发送 resize(尺寸变更) cols/rows
+  Server->>PTY: ioctl(输入输出控制调用) 同步终端尺寸
+```
+
+### 后续能力记录
+
+后续方向只记录在 `docs/TODO.md`, 本轮不实现 Live UI(实时界面) 上传, 设备指标, logcat(Android 系统日志), 自动化任务, Probe 报告, Agent 分析和多设备管理。
+
 ## 项目状态
 
 Mira 现在处于首周 MVP 阶段。
