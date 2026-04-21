@@ -312,6 +312,28 @@ http://<电脑局域网IP>:8765
 
 内置工具箱说明见 `docs/TOOLBOX.md`。
 
+## MCP 接入说明
+
+Mira 现在提供 MCP(Model Context Protocol, 模型上下文协议) server(服务端), 让外部 Codex 这类 AI client(智能客户端) 可以通过标准 tools(工具), resources(资源) 和 prompts(提示模板) 操作 Relay Terminal(中继终端)。
+
+启动 Relay Server 后, MCP client 以 stdio(标准输入输出) 方式启动:
+
+```bash
+python3 -m mira.mcp.server \
+  --relay http://127.0.0.1:8765 \
+  --broadcast-target 255.255.255.255
+```
+
+核心工具包括:
+
+1. `mira_discover_devices`: 扫描设备。
+2. `mira_open_terminal`: 打开远程 PTY(伪终端) session(会话)。
+3. `mira_run_command`: 在同一个 PTY 中执行命令并读取输出。
+4. `mira_collect_snapshot`: 采集第一轮 Android(安卓系统) 分析快照。
+5. `mira_close_terminal`: 关闭会话并清理设备侧临时状态。
+
+完整说明见 `docs/MCP.md`。
+
 ## Web Terminal MVP 运行说明
 
 本轮 MVP(最小可行产品) 只实现 Web Terminal(网页终端) 到 PTY(伪终端) 的实时连接, 不实现 Probe(检测探针), Report(风险报告), Agent(智能体) 分析或多设备管理。
