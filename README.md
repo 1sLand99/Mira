@@ -259,6 +259,25 @@ Android Relay URL: https://*.trycloudflare.com
 
 电脑浏览器打开 Browser URL。手机打开 Mira APK, 填写 Android Relay URL, 点击 `Connect Relay`。
 
+该脚本会自动构建 `apps/console`。如果要跳过前端构建, 可以设置:
+
+```bash
+MIRA_SKIP_CONSOLE_BUILD=1 ./tools/relay/start-public-relay.sh
+```
+
+Relay 默认会优先加载 `apps/console` 的 Next.js(前端应用框架) 构建产物, 展示设备大厅和三栏式设备工作台。如果没有构建产物, 服务端会自动回退到内置的最小 Web Terminal(网页终端) 页面。
+
+构建新版浏览器控制台:
+
+```bash
+cd apps/console
+npm install
+npm run build
+cd ../..
+```
+
+随后重新启动 Relay 即可看到新版 UI(用户界面)。
+
 ### 局域网启动
 
 ```bash

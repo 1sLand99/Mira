@@ -28,6 +28,7 @@ from mira.bridge.websocket import (
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 WEB_DIR = ROOT_DIR / "web"
+CONSOLE_OUT_DIR = ROOT_DIR / "apps" / "console" / "out"
 RING_LIMIT = 1024 * 1024
 PROTOCOL_VERSION = 1
 
@@ -343,7 +344,49 @@ def parse_json_body(body: bytes) -> dict[str, Any]:
     return data
 
 
+def file_response(path: Path) -> bytes:
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if content_type.startswith("text/") or path.suffix in {".js", ".css", ".svg"}:
+        content_type += "; charset=utf-8"
+    return http_response("200 OK", path.read_bytes(), content_type)
+
+
+def console_static_response(path: str) -> bytes | None:
+    if not CONSOLE_OUT_DIR.is_dir():
+        return None
+    if path in {"/api", "/ws"} or path.startswith(("/api/", "/ws/")):
+        return None
+
+    normalized = posixpath.normpath(unquote(path)).lstrip("/")
+    root = CONSOLE_OUT_DIR.resolve()
+    candidates: list[Path] = []
+    if normalized in {"", "."}:
+        candidates.append(root / "index.html")
+    else:
+        base = (root / normalized).resolve()
+        candidates.extend(
+            [
+                base,
+                root / f"{normalized}.html",
+                base / "index.html",
+            ]
+        )
+    candidates.append(root / "index.html")
+
+    for candidate in candidates:
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        if candidate.is_file():
+            return file_response(candidate)
+    return None
+
+
 def static_response(path: str) -> bytes | None:
+    response = console_static_response(path)
+    if response is not None:
+        return response
     if path == "/":
         return http_response("200 OK", INDEX_HTML.encode("utf-8"), "text/html; charset=utf-8")
     if path == "/relay.js":
@@ -358,10 +401,7 @@ def static_response(path: str) -> bytes | None:
         except ValueError:
             return None
         if candidate.is_file():
-            content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
-            if content_type.startswith("text/") or candidate.suffix in {".js", ".css"}:
-                content_type += "; charset=utf-8"
-            return http_response("200 OK", candidate.read_bytes(), content_type)
+            return file_response(candidate)
     return None
 
 

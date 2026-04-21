@@ -1,0 +1,27 @@
+{
+  "name": "@mira/console",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "NEXT_PUBLIC_RELAY_ORIGIN=http://127.0.0.1:8765 NEXT_PUBLIC_RELAY_WS=ws://127.0.0.1:8765 next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "latest",
+    "@xterm/xterm": "latest",
+    "clsx": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest"
+  }
+}

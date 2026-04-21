@@ -6,6 +6,8 @@
 node_modules/
 dist/
 build/
+apps/console/.next/
+apps/console/out/
 
 .venv/
 venv/

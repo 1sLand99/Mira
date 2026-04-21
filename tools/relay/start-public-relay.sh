@@ -6,6 +6,7 @@ PORT="${MIRA_RELAY_PORT:-8765}"
 HOST="${MIRA_RELAY_HOST:-127.0.0.1}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 CLOUDFLARED_BIN="${CLOUDFLARED_BIN:-cloudflared}"
+CONSOLE_DIR="${ROOT_DIR}/apps/console"
 LOG_FILE=""
 CLOUDFLARED_PID=""
 
@@ -20,6 +21,8 @@ Environment variables:
   MIRA_RELAY_HOST   Relay bind host, default 127.0.0.1
   PYTHON_BIN        Python command, default python3
   CLOUDFLARED_BIN   cloudflared command, default cloudflared
+  MIRA_SKIP_CONSOLE_BUILD
+                   Set to 1 to skip building apps/console
 MSG
   exit 0
 fi
@@ -44,6 +47,18 @@ if ! command -v "${CLOUDFLARED_BIN}" >/dev/null 2>&1; then
 fi
 
 cd "${ROOT_DIR}"
+
+if [[ "${MIRA_SKIP_CONSOLE_BUILD:-0}" != "1" && -f "${CONSOLE_DIR}/package.json" ]]; then
+  if command -v npm >/dev/null 2>&1; then
+    echo "Building Mira console ..."
+    if [[ ! -d "${CONSOLE_DIR}/node_modules" ]]; then
+      npm --prefix "${CONSOLE_DIR}" ci
+    fi
+    npm --prefix "${CONSOLE_DIR}" run build
+  else
+    echo "npm not found. Relay will use the built-in fallback UI." >&2
+  fi
+fi
 
 echo "Starting Cloudflare quick tunnel for http://127.0.0.1:${PORT} ..."
 "${CLOUDFLARED_BIN}" tunnel \
