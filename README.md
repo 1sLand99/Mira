@@ -212,23 +212,9 @@ adb install -r android/app/build/outputs/apk/debug/mira-app-debug.apk
 adb shell am start -n com.vwww.mira/.MainActivity
 ```
 
-Mira APK 的 Local Terminal(本地终端) 模式会启动随机本地端口, 并带本地 WebView(网页视图) 专用的一次性 token(访问令牌)。端口和令牌不会写死在代码里, 该 token 不参与远程 Relay(中继) 协议。
+Mira APK 首页只暴露远程 Relay(中继) 连接入口。Local Terminal(本地终端) 调试入口不再展示在手机首页。
 
-如果要从电脑浏览器访问设备内 Web Terminal, 可以用 adb forward(安卓调试桥端口转发):
-
-```bash
-adb logcat -d -s Mira:I
-adb forward tcp:8765 tcp:<device_port>
-open "http://127.0.0.1:8765/?token=<token>"
-```
-
-其中 `<device_port>` 和 `<token>` 来自日志里的:
-
-```text
-Mira Web Terminal listening on http://127.0.0.1:<device_port>/?token=<token>
-```
-
-服务端会允许带正确 token 的 localhost(本机地址) 来源, 因此电脑浏览器通过 `127.0.0.1:8765` 访问不会因为设备内随机端口不同而被拒绝。
+当前手机侧只需要填写 Relay URL(中继地址), 点击 Connect Relay(连接中继), 然后由浏览器在 Relay 页面按需打开真实 PTY。远程运行方式见下方 `Remote On-Demand Terminal 运行说明`。
 
 当前 shell 路径和工作目录是:
 
@@ -236,32 +222,6 @@ Mira Web Terminal listening on http://127.0.0.1:<device_port>/?token=<token>
 /data/user/0/com.vwww.mira/files/usr/bin/sh
 /data/user/0/com.vwww.mira/files/home
 ```
-
-### 当前 Android 数据流
-
-```mermaid
-sequenceDiagram
-  participant APK as Mira APK(安卓安装包)
-  participant WV as WebView(网页视图)
-  participant WS as WebSocket(网页长连接协议)
-  participant Server as Local Server(本地服务)
-  participant JNI as Termux JNI(本地接口)
-  participant PTY as PTY(伪终端)
-  participant Shell as files/usr/bin/sh
-
-  APK->>Server: 启动 127.0.0.1 随机端口
-  APK->>WV: 加载 Web Terminal 页面
-  WV->>WS: 连接 /ws/terminal
-  WS->>Server: 发送 input(输入) 和 resize(尺寸变更)
-  Server->>JNI: createSubprocess 创建 PTY 子进程
-  JNI->>PTY: 持有 PTY master(伪终端主端)
-  PTY->>Shell: shell 运行在 Mira 私有沙盒
-  Shell->>PTY: 输出字节流
-  PTY->>Server: 读取输出
-  Server->>WV: WebSocket 二进制帧回传
-```
-
-详细说明见 `docs/ANDROID-MVP.md`。
 
 ### Termux fork 备用路线
 
