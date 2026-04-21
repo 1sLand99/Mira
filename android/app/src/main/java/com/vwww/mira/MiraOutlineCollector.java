@@ -118,7 +118,8 @@ public final class MiraOutlineCollector {
             DisplayMetrics metrics = activity.getResources().getDisplayMetrics();
             JSONArray nodes = new JSONArray();
             int[] nodeCount = new int[] {0};
-            JSONObject rootNode = node(root, 0, "0", nodes, nodeCount);
+            JSONObject rootNode = viewMeta(root, 0, "0");
+            collectNodes(root, 0, "0", nodes, nodeCount);
             JSONObject outline = new JSONObject();
             outline.put("available", true);
             outline.put("schema", "mira.view-bounds.v1");
@@ -145,30 +146,24 @@ public final class MiraOutlineCollector {
         return window == null ? null : window.getDecorView();
     }
 
-    private JSONObject node(View view, int depth, String path, JSONArray flatNodes, int[] nodeCount) throws Exception {
+    private void collectNodes(View view, int depth, String path, JSONArray flatNodes, int[] nodeCount) throws Exception {
         JSONObject json = viewMeta(view, depth, path);
         if (shouldInclude(flatNodes, json, nodeCount)) {
-            flatNodes.put(viewMeta(view, depth, path));
+            flatNodes.put(json);
             nodeCount[0]++;
         }
-
-        JSONArray children = new JSONArray();
-        if (view instanceof ViewGroup && depth < MAX_DEPTH && nodeCount[0] < MAX_NODES) {
-            ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount() && nodeCount[0] < MAX_NODES; i++) {
-                View child = group.getChildAt(i);
-                if (child != null) children.put(node(child, depth + 1, path + "." + i, flatNodes, nodeCount));
-            }
+        if (!(view instanceof ViewGroup) || depth >= MAX_DEPTH || nodeCount[0] >= MAX_NODES) return;
+        ViewGroup group = (ViewGroup) view;
+        for (int i = 0; i < group.getChildCount() && nodeCount[0] < MAX_NODES; i++) {
+            View child = group.getChildAt(i);
+            if (child != null) collectNodes(child, depth + 1, path + "." + i, flatNodes, nodeCount);
         }
-        json.put("children", children);
-        return json;
     }
 
     private JSONObject viewMeta(View view, int depth, String path) throws Exception {
         JSONObject json = new JSONObject();
         JSONObject visibleBounds = visibleBounds(view);
         json.put("path", path);
-        json.put("className", view.getClass().getName());
         json.put("simpleClass", view.getClass().getSimpleName());
         json.put("role", role(view));
         json.put("resourceName", resourceName(view));
@@ -205,8 +200,7 @@ public final class MiraOutlineCollector {
             .put("left", location[0])
             .put("top", location[1])
             .put("right", location[0] + view.getWidth())
-            .put("bottom", location[1] + view.getHeight())
-            .put("visible", visibleBounds(view));
+            .put("bottom", location[1] + view.getHeight());
     }
 
     private static JSONObject visibleBounds(View view) throws Exception {

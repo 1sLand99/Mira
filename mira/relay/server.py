@@ -278,6 +278,43 @@ async def api_devices(state: RelayState) -> bytes:
         return json_response("200 OK", {"devices": [device_payload(record) for record in state.devices.values()]})
 
 
+async def api_outline(state: RelayState, body: dict[str, Any]) -> bytes:
+    install_id = str(body.get("installId") or "")
+    if not install_id:
+        return json_response("400 Bad Request", {"error": "missing installId"})
+    outline = body.get("outline")
+    if not isinstance(outline, dict):
+        return json_response("400 Bad Request", {"error": "invalid device outline"})
+    now = time.time()
+    async with state.lock:
+        record = state.devices.get(install_id)
+        if record is None:
+            data = {
+                "type": "mira.device",
+                "protocol": PROTOCOL_VERSION,
+                "installId": install_id,
+                "deviceName": str(body.get("deviceName") or "Mira Device"),
+                "state": str(body.get("state") or "idle"),
+                "transport": str(body.get("transport") or "control"),
+            }
+            record = DeviceRecord(install_id, data, "", now)
+            state.devices[install_id] = record
+        else:
+            if body.get("deviceName"):
+                record.data["deviceName"] = str(body.get("deviceName"))
+            if body.get("state"):
+                record.data["state"] = str(body.get("state"))
+        record.outline = outline
+        record.outline_last_seen = now
+        record.data["outline"] = outline
+        record.data["outlineLastSeen"] = now
+        record.last_seen = now
+    nodes = outline.get("nodes")
+    node_count = len(nodes) if isinstance(nodes, list) else outline.get("nodeCount", "unknown")
+    print(f"Received outline installId={install_id} nodes={node_count}", flush=True)
+    return json_response("200 OK", {"ok": True, "outlineLastSeen": now})
+
+
 def post_json(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": "application/json"})
@@ -608,6 +645,8 @@ async def handle_client(state: RelayState, reader: asyncio.StreamReader, writer:
             return
         if path == "/api/devices" and method.upper() == "GET":
             writer.write(await api_devices(state))
+        elif path in {"/api/outline", "/api/device/outline"} and method.upper() == "POST":
+            writer.write(await api_outline(state, parse_json_body(body)))
         elif path == "/api/discover" and method.upper() == "POST":
             writer.write(await api_discover(state, parse_json_body(body)))
         elif path == "/api/open" and method.upper() == "POST":

@@ -6,7 +6,10 @@ import android.util.Log;
 import org.json.JSONObject;
 
 import java.io.Closeable;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.URL;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -118,7 +121,7 @@ public final class MiraControlClient implements Closeable {
             if ("control.ready".equals(type)) {
                 controlReady.set(true);
                 notifyStatus("control ready");
-                sendOutline();
+                sendOutlineIfReady("control.ready");
                 continue;
             }
             if (callback != null) callback.onControlMessage(message);
@@ -150,8 +153,16 @@ public final class MiraControlClient implements Closeable {
     }
 
     private void sendOutlineIfReady() {
+        sendOutlineIfReady("timer");
+    }
+
+    private void sendOutlineIfReady(String trigger) {
         if (!running.get() || !controlReady.get() || outlineProvider == null) return;
         try {
+            MiraWebSocketConnection current = websocket;
+            if (current == null) return;
+            JSONObject outline = outlineProvider.currentOutline();
+            int nodes = outline.optJSONArray("nodes") == null ? -1 : outline.optJSONArray("nodes").length();
             JSONObject message = new JSONObject();
             message.put("type", "device.outline");
             message.put("transport", "control");
@@ -159,11 +170,13 @@ public final class MiraControlClient implements Closeable {
             message.put("deviceName", deviceName);
             message.put("state", stateProvider == null ? "idle" : stateProvider.currentState());
             message.put("capturedAt", System.currentTimeMillis());
-            message.put("outline", outlineProvider.currentOutline());
-            MiraWebSocketConnection current = websocket;
-            if (current != null) current.sendJson(message);
+            message.put("outline", outline);
+            int bytes = message.toString().getBytes(StandardCharsets.UTF_8).length;
+            Log.i(TAG, "posting outline trigger=" + trigger + " available=" + outline.optBoolean("available", false) + " nodes=" + nodes + " bytes=" + bytes);
+            postOutline(message);
+            Log.i(TAG, "outline posted trigger=" + trigger + " nodes=" + nodes);
         } catch (Throwable throwable) {
-            Log.w(TAG, "Outline send failed", throwable);
+            Log.w(TAG, "Outline send failed trigger=" + trigger, throwable);
         }
     }
 
@@ -173,6 +186,34 @@ public final class MiraControlClient implements Closeable {
         json.put("transport", "control");
         json.put("relayUrl", normalizeRelayUrl(relayUrl));
         return json;
+    }
+
+    private void postOutline(JSONObject message) throws Exception {
+        byte[] data = message.toString().getBytes(StandardCharsets.UTF_8);
+        HttpURLConnection connection = (HttpURLConnection) new URL(outlinePostUrl(relayUrl)).openConnection();
+        connection.setConnectTimeout(5000);
+        connection.setReadTimeout(5000);
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        connection.setFixedLengthStreamingMode(data.length);
+        try (OutputStream output = connection.getOutputStream()) {
+            output.write(data);
+        }
+        int code = connection.getResponseCode();
+        connection.disconnect();
+        if (code < 200 || code >= 300) throw new IllegalStateException("outline post failed: HTTP " + code);
+    }
+
+    private String outlinePostUrl(String value) throws Exception {
+        String raw = normalizeRelayUrl(value);
+        URI uri = new URI(raw);
+        String authority = uri.getRawAuthority();
+        if (authority == null || authority.trim().isEmpty()) throw new IllegalArgumentException("Relay URL host is empty");
+        String path = uri.getRawPath();
+        if (path == null || path.isEmpty() || "/".equals(path)) path = "/api/outline";
+        else if (!path.endsWith("/api/outline")) path = path.replaceAll("/+$", "") + "/api/outline";
+        return uri.getScheme() + "://" + authority + path;
     }
 
     private String normalizeRelayUrl(String value) {
