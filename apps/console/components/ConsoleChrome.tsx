@@ -46,7 +46,7 @@ export function Lobby({ devices, onSelect }: { devices: MiraDevice[]; onSelect: 
   return (
     <section className="min-h-0 flex-1 overflow-auto bg-[#f5f5f5] p-4 text-[#111]">
       <div className="border border-[#cfcfcf] bg-white">
-        <div className="border-b border-[#cfcfcf] px-3 py-2 font-mono text-[13px] font-semibold">Devices</div>
+        <div className="border-b border-[#cfcfcf] px-3 py-2 font-mono text-[12px] font-semibold">Devices</div>
         {devices.length ? (
           <div className="divide-y divide-[#dedede]">
             {devices.map((device) => (
@@ -54,7 +54,7 @@ export function Lobby({ devices, onSelect }: { devices: MiraDevice[]; onSelect: 
                 key={device.installId}
                 type="button"
                 onClick={() => onSelect(device)}
-                className="grid w-full grid-cols-[220px_150px_1fr_90px] gap-3 px-3 py-2 text-left font-mono text-[12px] hover:bg-[#f3f7ff]"
+                className="grid w-full grid-cols-[220px_150px_1fr_90px] gap-3 px-3 py-2 text-left font-mono text-[11px] hover:bg-[#f3f7ff]"
               >
                 <span className="truncate font-semibold">{deviceTitle(device)}</span>
                 <span className="truncate text-[#555]">{shortId(device.installId)}</span>
@@ -64,7 +64,7 @@ export function Lobby({ devices, onSelect }: { devices: MiraDevice[]; onSelect: 
             ))}
           </div>
         ) : (
-          <div className="px-3 py-10 font-mono text-[12px] text-[#666]">No device connected.</div>
+          <div className="px-3 py-10 font-mono text-[11px] text-[#666]">No device connected.</div>
         )}
       </div>
     </section>
