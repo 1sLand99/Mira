@@ -1,4 +1,5 @@
 #include "mira/pty.h"
+#include "pty/pty_platform.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -13,26 +14,6 @@ struct mira_pty_process {
     int wait_status;
     int wait_finished;
 };
-
-/* 平台实现由 native/platform/android/pty_android.c 提供。 */
-extern int mira_pty_platform_spawn(const char *shell_path,
-                                   const char *cwd,
-                                   char *const argv[],
-                                   char *const envp[],
-                                   int rows,
-                                   int columns,
-                                   int cell_width,
-                                   int cell_height,
-                                   int *master_fd,
-                                   pid_t *pid);
-
-extern ssize_t mira_pty_platform_read(int master_fd, void *buffer, size_t length);
-extern ssize_t mira_pty_platform_write(int master_fd, const void *buffer, size_t length);
-extern int mira_pty_platform_resize(int master_fd, int columns, int rows, int cell_width, int cell_height);
-extern int mira_pty_platform_set_utf8_mode(int master_fd);
-extern int mira_pty_platform_wait_for(pid_t pid, int *status);
-extern int mira_pty_platform_kill(pid_t pid, int signal_number);
-extern int mira_pty_platform_close(int fd);
 
 static int mira_pty_normalize_wait_status(int status) {
     if (WIFEXITED(status)) {

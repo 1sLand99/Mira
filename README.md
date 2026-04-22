@@ -205,6 +205,8 @@ Mira 当前主线已经切到 Android APK(安卓安装包) 形态, 目标是在 
 android/app/build/outputs/apk/debug/mira-app-debug.apk
 ```
 
+原生 PTY(伪终端) 层已经整理为 Android(安卓系统) 和 iOS(苹果移动系统) 可共享的 POSIX(可移植操作系统接口) 架构, 详细边界见 `docs/NATIVE-ARCHITECTURE.md`。
+
 ### 安装并启动
 
 ```bash
@@ -328,17 +330,22 @@ cd ../..
 ### 局域网启动
 
 ```bash
-python3 -m mira.relay.server \
-  --host 0.0.0.0 \
-  --port 8765 \
-  --advertise-url http://<电脑局域网IP>:8765
+./mira-local-web
 ```
 
-浏览器和手机都使用同一个地址:
+电脑浏览器打开:
+
+```text
+http://localhost:8765
+```
+
+Android 手机端填写:
 
 ```text
 http://<电脑局域网IP>:8765
 ```
+
+局域网模式下电脑浏览器使用 localhost(本机地址), 手机使用电脑局域网 IP(网络地址)。这样浏览器侧 WebCodecs(网页编解码接口) 可以正常解 H.264(视频编码格式), 同时 Android APK(安卓安装包) 仍然能从手机访问 Relay(中继服务)。
 
 ### Android 端
 

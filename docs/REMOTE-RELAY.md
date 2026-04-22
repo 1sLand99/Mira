@@ -98,7 +98,24 @@ MIRA_PUBLIC_URL=https://xxxx.r36.cpolar.top ./mira-web
 
 ## 局域网启动
 
-如果只在局域网测试, 可以直接启动 Relay:
+如果只在局域网测试, 优先使用本地启动脚本:
+
+```bash
+./mira-local-web
+```
+
+脚本会自动打印两个地址:
+
+```text
+Browser URL: http://localhost:8765
+Android Relay URL: http://<电脑局域网IP>:8765
+```
+
+电脑浏览器应该打开 `Browser URL`, 也就是 `localhost` 地址。这样 WebCodecs(网页编解码接口) 可以在 localhost secure context(本机安全上下文) 中启用, 远程画面 H.264(视频编码格式) 解码才可用。
+
+Android App(安卓应用) 首页填写 `Android Relay URL`, 也就是电脑局域网 IP(网络地址)。手机不能填写 `localhost`, 因为手机上的 localhost 指向手机自己。
+
+如果需要手动启动 Relay, 可以直接运行:
 
 ```bash
 python3 -m mira.relay.server \

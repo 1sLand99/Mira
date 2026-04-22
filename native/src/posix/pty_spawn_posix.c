@@ -4,15 +4,12 @@
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 600
 #endif
-#if defined(__APPLE__)
-#define _DARWIN_C_SOURCE
-#endif
 
 #include "mira/pty.h"
+#include "posix/pty_posix_platform.h"
+#include "pty/pty_platform.h"
 
-#include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,12 +19,6 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
-
-#if defined(__APPLE__)
-#include <util.h>
-#else
-#include <pty.h>
-#endif
 
 static unsigned short mira_pty_clamp_size(int value, unsigned short fallback) {
     if (value <= 0) {
@@ -86,28 +77,6 @@ static void mira_pty_configure_termios(int fd) {
 #endif
     tios.c_iflag &= (tcflag_t) ~(IXON | IXOFF);
     (void) tcsetattr(fd, TCSANOW, &tios);
-}
-
-static void mira_pty_close_extra_fds(void) {
-    DIR *dir = opendir("/proc/self/fd");
-    if (dir == NULL) {
-        return;
-    }
-
-    int dir_fd = dirfd(dir);
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        char *end = NULL;
-        long fd = strtol(entry->d_name, &end, 10);
-        if (end == entry->d_name || *end != '\0') {
-            continue;
-        }
-        if (fd > 2 && fd != dir_fd) {
-            close((int) fd);
-        }
-    }
-
-    closedir(dir);
 }
 
 static void mira_pty_make_controlling_terminal(int slave_fd) {
@@ -184,35 +153,19 @@ int mira_pty_platform_spawn(const char *shell_path,
         return -1;
     }
 
-    int ptm = -1;
-    int pts = -1;
+    mira_pty_platform_pair_t pair;
+    if (mira_pty_platform_open_pair(&pair) != 0) {
+        return -1;
+    }
 
-#if defined(__APPLE__)
-    if (openpty(&ptm, &pts, NULL, NULL, NULL) != 0) {
-        return -1;
-    }
-#else
-    char slave_name[128];
-    ptm = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
-    if (ptm < 0) {
-        return -1;
-    }
-    if (grantpt(ptm) != 0 || unlockpt(ptm) != 0 || ptsname_r(ptm, slave_name, sizeof(slave_name)) != 0) {
+    mira_pty_configure_termios(pair.master_fd);
+
+    if (mira_pty_set_window_size(pair.master_fd, rows, columns, cell_width, cell_height) != 0) {
         int saved_errno = errno;
-        close(ptm);
-        errno = saved_errno;
-        return -1;
-    }
-#endif
-
-    mira_pty_configure_termios(ptm);
-
-    if (mira_pty_set_window_size(ptm, rows, columns, cell_width, cell_height) != 0) {
-        int saved_errno = errno;
-        if (pts >= 0) {
-            close(pts);
+        if (pair.slave_fd >= 0) {
+            close(pair.slave_fd);
         }
-        close(ptm);
+        close(pair.master_fd);
         errno = saved_errno;
         return -1;
     }
@@ -220,19 +173,19 @@ int mira_pty_platform_spawn(const char *shell_path,
     pid_t child = fork();
     if (child < 0) {
         int saved_errno = errno;
-        if (pts >= 0) {
-            close(pts);
+        if (pair.slave_fd >= 0) {
+            close(pair.slave_fd);
         }
-        close(ptm);
+        close(pair.master_fd);
         errno = saved_errno;
         return -1;
     }
 
     if (child > 0) {
-        *master_fd = ptm;
+        *master_fd = pair.master_fd;
         *pid = child;
-        if (pts >= 0) {
-            close(pts);
+        if (pair.slave_fd >= 0) {
+            close(pair.slave_fd);
         }
         return 0;
     }
@@ -241,19 +194,11 @@ int mira_pty_platform_spawn(const char *shell_path,
     sigfillset(&signals_to_unblock);
     sigprocmask(SIG_UNBLOCK, &signals_to_unblock, NULL);
 
-#if defined(__APPLE__)
-    close(ptm);
+    close(pair.master_fd);
     if (setsid() < 0) {
         _exit(1);
     }
-    /* openpty() already gave us the slave end as pts. */
-#else
-    close(ptm);
-    if (setsid() < 0) {
-        _exit(1);
-    }
-    pts = open(slave_name, O_RDWR);
-#endif
+    int pts = mira_pty_platform_open_slave(&pair);
     if (pts < 0) {
         _exit(1);
     }
@@ -266,7 +211,7 @@ int mira_pty_platform_spawn(const char *shell_path,
         close(pts);
     }
 
-    mira_pty_close_extra_fds();
+    mira_pty_platform_close_extra_fds();
     mira_pty_apply_environment(envp);
 
     if (cwd != NULL && cwd[0] != '\0' && chdir(cwd) != 0) {
