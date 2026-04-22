@@ -12,9 +12,15 @@ final class MiraControlViewModel: ObservableObject {
     }
 
     @Published private(set) var statusText: String = "disconnected"
+    private var statusTimer: Timer?
 
     init() {
         relayURL = UserDefaults.standard.string(forKey: DefaultsKey.relayURL) ?? ""
+        refreshNativeStatus()
+    }
+
+    deinit {
+        statusTimer?.invalidate()
     }
 
     func connectRelay() {
@@ -24,10 +30,31 @@ final class MiraControlViewModel: ObservableObject {
             return
         }
         relayURL = normalized
-        statusText = "relay UI ready"
+        if MiraNativeStatus.startRelay(url: normalized) {
+            statusText = MiraNativeStatus.current.ptyLifecycle
+            startStatusPolling()
+        } else {
+            statusText = MiraNativeStatus.current.ptyLifecycle
+        }
     }
 
     func disconnectRelay() {
-        statusText = "disconnected"
+        statusTimer?.invalidate()
+        statusTimer = nil
+        MiraNativeStatus.stopRelay()
+        refreshNativeStatus()
+    }
+
+    private func startStatusPolling() {
+        statusTimer?.invalidate()
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.refreshNativeStatus()
+        }
+        RunLoop.main.add(statusTimer!, forMode: .common)
+    }
+
+    private func refreshNativeStatus() {
+        let native = MiraNativeStatus.current
+        statusText = "\(native.backendName): \(native.ptyLifecycle)"
     }
 }

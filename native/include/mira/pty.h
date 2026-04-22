@@ -34,6 +34,7 @@ int mira_pty_set_utf8_mode(mira_pty_process_t *pty);
 int mira_pty_wait_for(mira_pty_process_t *pty);
 int mira_pty_kill(mira_pty_process_t *pty, int signal_number);
 int mira_pty_close(mira_pty_process_t *pty);
+void mira_pty_destroy(mira_pty_process_t *pty);
 
 pid_t mira_pty_pid(const mira_pty_process_t *pty);
 int mira_pty_fd(const mira_pty_process_t *pty);

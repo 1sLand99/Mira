@@ -11,6 +11,11 @@ set(MIRA_PTY_CORE_SOURCES
     src/posix/pty_spawn_posix.c
 )
 
+set(MIRA_SHELL_CORE_SOURCES
+    src/shell/shell_core.c
+    src/shell/builtin_shell.c
+)
+
 if(ANDROID)
     add_library(mira_pty SHARED
         ${MIRA_PTY_CORE_SOURCES}
@@ -31,8 +36,9 @@ else()
 endif()
 
 target_include_directories(mira_pty
-    PRIVATE
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/bridge/ios
 )
@@ -41,4 +47,20 @@ target_compile_definitions(mira_pty
     PRIVATE
         _GNU_SOURCE
         _XOPEN_SOURCE=600
+)
+
+add_library(mira_shell STATIC
+    ${MIRA_SHELL_CORE_SOURCES}
+)
+
+target_include_directories(mira_shell
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(mira_shell
+    PRIVATE
+        mira_pty
 )

@@ -15,6 +15,10 @@ extern "C" {
  */
 const char *mira_pty_ios_backend_name(void);
 
+int mira_ios_relay_start(const char *relay_url, const char *device_name, const char *home_dir);
+void mira_ios_relay_stop(void);
+const char *mira_ios_relay_status(void);
+
 #ifdef __cplusplus
 }
 #endif

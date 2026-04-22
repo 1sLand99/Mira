@@ -91,9 +91,11 @@ static void mira_pty_make_controlling_terminal(int slave_fd) {
 
 static void mira_pty_clear_environment(void) {
     extern char **environ;
+#if !defined(__APPLE__)
     if (clearenv() == 0) {
         return;
     }
+#endif
     if (environ != NULL) {
         size_t count = 0;
         for (char **cursor = environ; *cursor != NULL; ++cursor) {

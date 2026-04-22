@@ -24,3 +24,7 @@ reports/local/
 android/app/src/main/assets/web/
 android/app/.cxx/
 android/app/.externalNativeBuild/
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate

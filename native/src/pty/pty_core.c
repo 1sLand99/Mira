@@ -146,6 +146,10 @@ int mira_pty_close(mira_pty_process_t *pty) {
     return rc;
 }
 
+void mira_pty_destroy(mira_pty_process_t *pty) {
+    free(pty);
+}
+
 pid_t mira_pty_pid(const mira_pty_process_t *pty) {
     if (pty == NULL) {
         return -1;

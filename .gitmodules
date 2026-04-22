@@ -7,3 +7,6 @@
 [submodule "third_party/termux-am-library"]
 	path = third_party/termux-am-library
 	url = https://github.com/termux/termux-am-library
+[submodule "third_party/ish"]
+	path = third_party/ish
+	url = https://github.com/ish-app/ish.git
