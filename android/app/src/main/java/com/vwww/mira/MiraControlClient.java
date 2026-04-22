@@ -35,6 +35,7 @@ public final class MiraControlClient implements Closeable {
 
     private static final String TAG = "MiraControlClient";
     private static final long OUTLINE_PERIOD_SECONDS = 2;
+    private static final long METRICS_PERIOD_SECONDS = 1;
 
     private final Context context;
     private final MiraIdentity identity;
@@ -75,6 +76,7 @@ public final class MiraControlClient implements Closeable {
     public void start() {
         if (!running.compareAndSet(false, true)) return;
         outboundExecutor.scheduleWithFixedDelay(this::sendOutlineIfReady, OUTLINE_PERIOD_SECONDS, OUTLINE_PERIOD_SECONDS, TimeUnit.SECONDS);
+        outboundExecutor.scheduleWithFixedDelay(this::sendMetricsIfReady, METRICS_PERIOD_SECONDS, METRICS_PERIOD_SECONDS, TimeUnit.SECONDS);
         workerThread = new Thread(this::runLoop, "MiraControlClient");
         workerThread.start();
     }
@@ -122,6 +124,7 @@ public final class MiraControlClient implements Closeable {
                 controlReady.set(true);
                 notifyStatus("control ready");
                 sendOutlineIfReady("control.ready");
+                sendMetricsIfReady();
                 continue;
             }
             if (callback != null) callback.onControlMessage(message);
@@ -177,6 +180,24 @@ public final class MiraControlClient implements Closeable {
             Log.i(TAG, "outline posted trigger=" + trigger + " nodes=" + nodes);
         } catch (Throwable throwable) {
             Log.w(TAG, "Outline send failed trigger=" + trigger, throwable);
+        }
+    }
+
+    private void sendMetricsIfReady() {
+        if (!running.get() || !controlReady.get()) return;
+        try {
+            MiraWebSocketConnection current = websocket;
+            if (current == null) return;
+            JSONObject message = new JSONObject();
+            message.put("type", "device.metrics");
+            message.put("protocol", 1);
+            message.put("installId", identity.getInstallId());
+            message.put("deviceName", deviceName);
+            message.put("state", stateProvider == null ? "idle" : stateProvider.currentState());
+            message.put("metrics", MiraDeviceMetrics.snapshot(context));
+            current.sendJson(message);
+        } catch (Throwable throwable) {
+            Log.w(TAG, "Metrics send failed", throwable);
         }
     }
 

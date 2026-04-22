@@ -75,6 +75,8 @@ export type MiraDevice = {
   wakeUrl?: string;
   outline?: Outline | null;
   outlineLastSeen?: number;
+  metrics?: DeviceMetrics | null;
+  metricsLastSeen?: number;
 };
 
 export type DevicesResponse = {
@@ -129,4 +131,15 @@ export type ScreenInputResponse = {
   message?: string;
   error?: string;
   text?: string;
+};
+
+export type DeviceMetrics = {
+  sampledAt?: number;
+  cpuPercent?: number;
+  memoryPercent?: number;
+  memoryUsedMb?: number;
+  memoryTotalMb?: number;
+  rxBps?: number;
+  txBps?: number;
+  networkBps?: number;
 };

@@ -51,6 +51,8 @@ class DeviceRecord:
     last_seen: float
     outline: dict[str, Any] | None = None
     outline_last_seen: float | None = None
+    metrics: dict[str, Any] | None = None
+    metrics_last_seen: float | None = None
     screen_frame: dict[str, Any] | None = None
     screen_last_seen: float | None = None
     screen_info: dict[str, Any] | None = None
@@ -334,6 +336,10 @@ def device_payload(record: DeviceRecord) -> dict[str, Any]:
         data["outline"] = record.outline
     if record.outline_last_seen is not None:
         data["outlineLastSeen"] = record.outline_last_seen
+    if record.metrics is not None:
+        data["metrics"] = record.metrics
+    if record.metrics_last_seen is not None:
+        data["metricsLastSeen"] = record.metrics_last_seen
     if record.address:
         data["address"] = record.address
     if data.get("transport") == "control" and (record.control_writer is None or record.control_writer.is_closing()):
@@ -823,6 +829,23 @@ async def handle_control_ws(state: RelayState, reader: asyncio.StreamReader, wri
                         record.outline_last_seen = now
                         record.data["outline"] = outline
                         record.data["outlineLastSeen"] = now
+                        record.last_seen = now
+            elif message.get("type") == "device.metrics":
+                message_install_id = str(message.get("installId") or "")
+                if message_install_id and message_install_id != install_id:
+                    await send_json(writer, lock, {"type": "error", "error": "installId mismatch"})
+                    continue
+                metrics = message.get("metrics")
+                if not isinstance(metrics, dict):
+                    await send_json(writer, lock, {"type": "error", "error": "invalid device metrics"})
+                    continue
+                now = time.time()
+                async with state.lock:
+                    if record := state.devices.get(install_id):
+                        record.metrics = metrics
+                        record.metrics_last_seen = now
+                        record.data["metrics"] = metrics
+                        record.data["metricsLastSeen"] = now
                         record.last_seen = now
             elif message.get("type") == "screen.input.result":
                 message_install_id = str(message.get("installId") or install_id)

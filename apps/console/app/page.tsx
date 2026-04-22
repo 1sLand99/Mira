@@ -51,7 +51,7 @@ export default function RelayConsolePage() {
     const initialDevice = hash.get('device');
     if (initialDevice) setSelectedId(initialDevice);
     refreshDevices();
-    const timer = window.setInterval(refreshDevices, 2000);
+    const timer = window.setInterval(refreshDevices, 1000);
     const onHash = () => {
       const nextHash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
       setSelectedId(nextHash.get('device'));
