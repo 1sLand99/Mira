@@ -63,6 +63,7 @@ public final class MiraPtyLaunchSpec {
         String basePath = prefix + "/bin:/system/bin:/system/xbin";
         String toolboxPath = toolbox == null ? "" : toolbox.pathPrefix();
         String path = toolbox == null ? basePath : toolboxPath + ":" + basePath;
+        String commandSocket = MiraLocalCommandServer.socketFile(context).getAbsolutePath();
 
         String[] args = new String[] {"sh"};
         String[] env = new String[] {
@@ -80,6 +81,7 @@ public final class MiraPtyLaunchSpec {
             "MIRA_BUSYBOX_ABI=" + (toolbox == null ? "" : toolbox.busyboxAbi()),
             "MIRA_BUSYBOX_ASSET=" + (toolbox == null ? "" : toolbox.busyboxAssetPath()),
             "MIRA_TOOLBOX_MANIFEST=" + (toolbox == null ? "" : toolbox.manifestPath()),
+            "MIRA_COMMAND_SOCKET=" + commandSocket,
             "SHELL=" + prefix + "/bin/sh",
             "MIRA_APP_PACKAGE=" + context.getPackageName(),
             "ENV=" + home + "/.profile"

@@ -37,6 +37,7 @@ public final class MiraBootstrap {
 
         writeExecutable(new File(prefixDir, "bin/sh"), shellWrapper());
         writeExecutable(new File(prefixDir, "bin/mira-info"), miraInfoScript());
+        writeMiraCommandWrappers();
         writeText(new File(prefixDir, "etc/profile"), profileScript());
         writeText(new File(homeDir, ".profile"), homeProfileScript());
     }
@@ -126,6 +127,48 @@ public final class MiraBootstrap {
             "echo \"HOME=$HOME\"\n" +
             "echo \"TMPDIR=$TMPDIR\"\n" +
             "echo \"SHELL=$SHELL\"\n";
+    }
+
+    private void writeMiraCommandWrappers() throws IOException {
+        String[] commands = new String[] {
+            "mira-am",
+            "mira-settings",
+            "mira-getprop",
+            "mira-dumpsys",
+            "mira-logcat"
+        };
+        File binDir = new File(prefixDir, "bin");
+        for (String command : commands) {
+            writeExecutable(new File(binDir, command), miraCommandScript(command));
+        }
+    }
+
+    private String miraCommandScript(String command) {
+        return "#!/system/bin/sh\n" +
+            "if [ -z \"$MIRA_COMMAND_SOCKET\" ]; then\n" +
+            "  echo \"" + command + ": MIRA_COMMAND_SOCKET is not set\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "mira_b64() {\n" +
+            "  if [ -n \"$MIRA_BUSYBOX\" ] && [ -x \"$MIRA_BUSYBOX\" ]; then \"$MIRA_BUSYBOX\" base64 \"$@\"; else /system/bin/toybox base64 \"$@\"; fi\n" +
+            "}\n" +
+            "request=\"MIRA/1 " + command + "\"\n" +
+            "for arg in \"$@\"; do\n" +
+            "  encoded=$(printf '%s' \"$arg\" | mira_b64 | tr -d '\\n')\n" +
+            "  request=\"$request $encoded\"\n" +
+            "done\n" +
+            "response=$(printf '%s\\n' \"$request\" | /system/bin/toybox nc -U -w 10 \"$MIRA_COMMAND_SOCKET\")\n" +
+            "status=$?\n" +
+            "if [ \"$status\" -ne 0 ]; then\n" +
+            "  echo \"" + command + ": command bridge unavailable\" >&2\n" +
+            "  exit \"$status\"\n" +
+            "fi\n" +
+            "exit_code=$(printf '%s\\n' \"$response\" | sed -n 's/^MIRA\\/1 EXIT //p' | head -1)\n" +
+            "stdout_b64=$(printf '%s\\n' \"$response\" | sed -n 's/^STDOUT //p' | head -1)\n" +
+            "stderr_b64=$(printf '%s\\n' \"$response\" | sed -n 's/^STDERR //p' | head -1)\n" +
+            "[ -n \"$stdout_b64\" ] && printf '%s' \"$stdout_b64\" | mira_b64 -d\n" +
+            "[ -n \"$stderr_b64\" ] && printf '%s' \"$stderr_b64\" | mira_b64 -d >&2\n" +
+            "case \"$exit_code\" in ''|*[!0-9]*) exit 1 ;; *) exit \"$exit_code\" ;; esac\n";
     }
 
     private String quote(String value) {

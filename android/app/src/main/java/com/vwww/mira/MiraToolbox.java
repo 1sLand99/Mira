@@ -61,6 +61,7 @@ public final class MiraToolbox implements Closeable {
         chmodExecutable(busyboxFile);
         Set<String> supportedApplets = queryBusyBoxApplets(busyboxFile);
         installApplets(busyboxFile, binDir, supportedApplets);
+        installMiraCommandWrappers(binDir);
 
         File manifestFile = new File(sessionRoot, "toolbox-manifest.json");
         copyAsset(appContext.getAssets(), MANIFEST_ASSET, manifestFile);
@@ -111,6 +112,20 @@ public final class MiraToolbox implements Closeable {
             installed++;
         }
         Log.i(TAG, "Installed " + installed + " busybox applets");
+    }
+
+    private static void installMiraCommandWrappers(File binDir) throws IOException {
+        String[] commands = new String[] {
+            "mira-am",
+            "mira-settings",
+            "mira-getprop",
+            "mira-dumpsys",
+            "mira-logcat"
+        };
+        for (String command : commands) {
+            File wrapper = new File(binDir, command);
+            writeMiraCommandWrapper(wrapper, command);
+        }
     }
 
     private static Set<String> queryBusyBoxApplets(File busyboxFile) throws IOException {
@@ -184,6 +199,38 @@ public final class MiraToolbox implements Closeable {
     private static void writeWrapper(File file, File busyboxFile, String applet) throws IOException {
         String script = "#!/system/bin/sh\n" +
             "exec " + quote(busyboxFile.getAbsolutePath()) + " " + applet + " \"$@\"\n";
+        try (FileOutputStream output = new FileOutputStream(file, false)) {
+            output.write(script.getBytes("UTF-8"));
+        }
+        chmodExecutable(file);
+    }
+
+    private static void writeMiraCommandWrapper(File file, String command) throws IOException {
+        String script = "#!/system/bin/sh\n" +
+            "if [ -z \"$MIRA_COMMAND_SOCKET\" ]; then\n" +
+            "  echo \"" + command + ": MIRA_COMMAND_SOCKET is not set\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "mira_b64() {\n" +
+            "  if [ -n \"$MIRA_BUSYBOX\" ] && [ -x \"$MIRA_BUSYBOX\" ]; then \"$MIRA_BUSYBOX\" base64 \"$@\"; else /system/bin/toybox base64 \"$@\"; fi\n" +
+            "}\n" +
+            "request=\"MIRA/1 " + command + "\"\n" +
+            "for arg in \"$@\"; do\n" +
+            "  encoded=$(printf '%s' \"$arg\" | mira_b64 | tr -d '\\n')\n" +
+            "  request=\"$request $encoded\"\n" +
+            "done\n" +
+            "response=$(printf '%s\\n' \"$request\" | /system/bin/toybox nc -U -w 10 \"$MIRA_COMMAND_SOCKET\")\n" +
+            "status=$?\n" +
+            "if [ \"$status\" -ne 0 ]; then\n" +
+            "  echo \"" + command + ": command bridge unavailable\" >&2\n" +
+            "  exit \"$status\"\n" +
+            "fi\n" +
+            "exit_code=$(printf '%s\\n' \"$response\" | sed -n 's/^MIRA\\/1 EXIT //p' | head -1)\n" +
+            "stdout_b64=$(printf '%s\\n' \"$response\" | sed -n 's/^STDOUT //p' | head -1)\n" +
+            "stderr_b64=$(printf '%s\\n' \"$response\" | sed -n 's/^STDERR //p' | head -1)\n" +
+            "[ -n \"$stdout_b64\" ] && printf '%s' \"$stdout_b64\" | mira_b64 -d\n" +
+            "[ -n \"$stderr_b64\" ] && printf '%s' \"$stderr_b64\" | mira_b64 -d >&2\n" +
+            "case \"$exit_code\" in ''|*[!0-9]*) exit 1 ;; *) exit \"$exit_code\" ;; esac\n";
         try (FileOutputStream output = new FileOutputStream(file, false)) {
             output.write(script.getBytes("UTF-8"));
         }

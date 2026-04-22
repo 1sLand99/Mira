@@ -61,6 +61,7 @@ public final class MiraDiscoveryService extends Service {
     private volatile String state = "idle";
     private volatile MiraRelayClient relayClient;
     private volatile MiraControlClient controlClient;
+    private volatile MiraLocalCommandServer commandServer;
 
     @Override
     public void onCreate() {
@@ -107,6 +108,7 @@ public final class MiraDiscoveryService extends Service {
         state = "idle";
         try {
             bootstrap.installIfNeeded();
+            startCommandServer();
             if (!relayUrl.isEmpty()) {
                 startControlClient();
                 return;
@@ -124,6 +126,7 @@ public final class MiraDiscoveryService extends Service {
         } catch (IOException e) {
             running.set(false);
             lifecycleGeneration.incrementAndGet();
+            closeCommandServer();
             releaseMulticastLock();
             publishStatus("startup failed: " + e.getMessage());
             throw new RuntimeException(e);
@@ -163,10 +166,18 @@ public final class MiraDiscoveryService extends Service {
         Log.i(TAG, "Control client starting relayUrl=" + relayUrl);
     }
 
+    private synchronized void startCommandServer() throws IOException {
+        if (commandServer != null) return;
+        MiraLocalCommandServer server = new MiraLocalCommandServer(this);
+        server.start();
+        commandServer = server;
+    }
+
     private void stopDiscovery() {
         running.set(false);
         lifecycleGeneration.incrementAndGet();
         closeRelay();
+        closeCommandServer();
         if (controlClient != null) {
             controlClient.close();
             controlClient = null;
@@ -313,6 +324,13 @@ public final class MiraDiscoveryService extends Service {
         }
         state = "idle";
         requestControlOutline();
+    }
+
+    private synchronized void closeCommandServer() {
+        if (commandServer != null) {
+            commandServer.close();
+            commandServer = null;
+        }
     }
 
     private void acquireMulticastLock() {
