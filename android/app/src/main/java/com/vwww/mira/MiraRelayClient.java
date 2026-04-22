@@ -4,8 +4,6 @@ import android.content.Context;
 import android.util.Base64;
 import android.util.Log;
 
-import com.termux.terminal.MiraPtyProcess;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -28,10 +26,11 @@ public final class MiraRelayClient implements Closeable {
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private volatile MiraWebSocketConnection websocket;
-    private MiraPtyProcess pty;
+    private MiraPtySession pty;
     private MiraToolbox toolbox;
     private Thread workerThread;
     private Thread ptyReaderThread;
+    private Thread ptyWaiterThread;
 
     public MiraRelayClient(
         Context context,
@@ -70,7 +69,7 @@ public final class MiraRelayClient implements Closeable {
             toolbox = MiraToolbox.prepare(context, sessionId);
             if (!running.get()) return;
             pty = MiraPtyFactory.create(context, bootstrap, initialRows, initialColumns, toolbox);
-            Log.i(TAG, "PTY started pid=" + pty.getPid() + " cols=" + initialColumns + " rows=" + initialRows);
+            Log.i(TAG, "PTY started backend=" + pty.getBackendName() + " pid=" + pty.getPid() + " cols=" + initialColumns + " rows=" + initialRows);
             if (!running.get()) return;
             MiraWebSocketConnection connected = MiraWebSocketConnection.connect(serverWs);
             if (!running.get()) {
@@ -82,6 +81,9 @@ public final class MiraRelayClient implements Closeable {
             Log.i(TAG, "Device attached sessionId=" + sessionId + " installId=" + identity.getInstallId());
             ptyReaderThread = new Thread(this::pumpPtyToServer, "MiraRelayPtyReader-" + pty.getPid());
             ptyReaderThread.start();
+            MiraPtySession waitingPty = pty;
+            ptyWaiterThread = new Thread(() -> waitForPtyExit(waitingPty), "MiraRelayPtyWaiter-" + waitingPty.getPid());
+            ptyWaiterThread.start();
             readServerLoop();
         } catch (Throwable throwable) {
             if (!running.get()) {
@@ -92,6 +94,15 @@ public final class MiraRelayClient implements Closeable {
         } finally {
             close();
             if (onClose != null) onClose.run();
+        }
+    }
+
+    private void waitForPtyExit(MiraPtySession waitingPty) {
+        try {
+            int exitCode = waitingPty.waitFor();
+            Log.i(TAG, "PTY exited backend=" + waitingPty.getBackendName() + " pid=" + waitingPty.getPid() + " exitCode=" + exitCode);
+        } catch (Throwable throwable) {
+            Log.w(TAG, "PTY waiter failed", throwable);
         }
     }
 

@@ -4,8 +4,6 @@ import android.content.Context;
 import android.content.res.AssetManager;
 import android.util.Base64;
 
-import com.termux.terminal.MiraPtyProcess;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -240,7 +238,7 @@ public final class MiraTerminalServer implements Closeable {
             "Sec-WebSocket-Accept: " + accept + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
         output.flush();
 
-        MiraPtyProcess pty = createPty();
+        MiraPtySession pty = createPty();
         Object writeLock = new Object();
         Thread readerThread = new Thread(() -> pumpPtyToWebSocket(pty, output, writeLock), "MiraPtyReader-" + pty.getPid());
         Thread waiterThread = new Thread(() -> {
@@ -274,11 +272,11 @@ public final class MiraTerminalServer implements Closeable {
         }
     }
 
-    private MiraPtyProcess createPty() {
+    private MiraPtySession createPty() {
         return MiraPtyFactory.create(context, bootstrap, 24, 80);
     }
 
-    private void handleTerminalMessage(MiraPtyProcess pty, String message) throws IOException {
+    private void handleTerminalMessage(MiraPtySession pty, String message) throws IOException {
         try {
             JSONObject json = new JSONObject(message);
             String type = json.optString("type", "");
@@ -291,7 +289,7 @@ public final class MiraTerminalServer implements Closeable {
         }
     }
 
-    private void pumpPtyToWebSocket(MiraPtyProcess pty, OutputStream output, Object writeLock) {
+    private void pumpPtyToWebSocket(MiraPtySession pty, OutputStream output, Object writeLock) {
         byte[] buffer = new byte[8192];
         try {
             while (running.get()) {
