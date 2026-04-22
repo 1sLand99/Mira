@@ -116,6 +116,7 @@ public final class MiraToolbox implements Closeable {
 
     private static void installMiraCommandWrappers(File binDir) throws IOException {
         String[] commands = new String[] {
+            "am",
             "mira-am",
             "mira-settings",
             "mira-getprop",
@@ -206,6 +207,7 @@ public final class MiraToolbox implements Closeable {
     }
 
     private static void writeMiraCommandWrapper(File file, String command) throws IOException {
+        if (file.exists() && !file.delete()) throw new IOException("无法替换 Mira 命令包装器: " + file.getAbsolutePath());
         String script = "#!/system/bin/sh\n" +
             "if [ -z \"$MIRA_COMMAND_SOCKET\" ]; then\n" +
             "  echo \"" + command + ": MIRA_COMMAND_SOCKET is not set\" >&2\n" +

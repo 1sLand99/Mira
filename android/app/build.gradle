@@ -36,6 +36,7 @@ android {
 }
 
 dependencies {
+    implementation project(":termux-am-library")
 }
 
 tasks.register("syncWebAssets", Copy) {

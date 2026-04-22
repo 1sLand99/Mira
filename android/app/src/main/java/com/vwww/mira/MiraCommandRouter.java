@@ -1,13 +1,16 @@
 package com.vwww.mira;
 
-import android.content.ComponentName;
+import android.app.Application;
 import android.content.Context;
-import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.Settings;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -37,6 +40,7 @@ final class MiraCommandRouter {
         if (argv == null) argv = new ArrayList<>();
         try {
             switch (tool) {
+                case "am":
                 case "mira-am":
                     return runAm(context, argv);
                 case "mira-settings":
@@ -55,109 +59,34 @@ final class MiraCommandRouter {
         }
     }
 
-    private static MiraCommandResult runAm(Context context, List<String> argv) {
-        if (argv.isEmpty() || "help".equals(argv.get(0)) || "--help".equals(argv.get(0))) {
-            return MiraCommandResult.ok("usage: mira-am start|broadcast [intent options]\n" +
-                "intent options: -a ACTION -d URI -t TYPE -c CATEGORY -n PACKAGE/CLASS -p PACKAGE --es KEY VALUE --ei KEY VALUE --el KEY VALUE --ef KEY VALUE --ez KEY VALUE\n");
+    private static MiraCommandResult runAm(Context context, List<String> argv) throws UnsupportedEncodingException {
+        Application application = asApplication(context);
+        List<String> effectiveArgv = argv;
+        boolean help = argv.isEmpty() || "help".equals(argv.get(0)) || "--help".equals(argv.get(0)) || "--am-help".equals(argv.get(0)) || "-h".equals(argv.get(0));
+        if (help) effectiveArgv = new ArrayList<>();
+
+        ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+        int exitCode;
+        try (PrintStream stdout = new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8.name());
+             PrintStream stderr = new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8.name())) {
+            exitCode = new com.termux.am.Am(stdout, stderr, application).run(effectiveArgv.toArray(new String[0]));
+            stdout.flush();
+            stderr.flush();
         }
 
-        String subcommand = argv.get(0);
-        Intent intent = parseIntent(argv.subList(1, argv.size()));
-        if ("start".equals(subcommand)) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
-            return MiraCommandResult.ok("Starting: " + intent.toUri(0) + "\n");
-        }
-        if ("broadcast".equals(subcommand)) {
-            context.sendBroadcast(intent);
-            return MiraCommandResult.ok("Broadcasting: " + intent.toUri(0) + "\n");
-        }
-        return MiraCommandResult.error("mira-am: unsupported subcommand: " + subcommand + "\n");
+        if (help) exitCode = 0;
+        return new MiraCommandResult(
+            exitCode,
+            stdoutBuffer.toString(StandardCharsets.UTF_8.name()),
+            stderrBuffer.toString(StandardCharsets.UTF_8.name())
+        );
     }
 
-    private static Intent parseIntent(List<String> args) {
-        Intent intent = new Intent();
-        Uri data = null;
-        String type = null;
-        for (int i = 0; i < args.size(); i++) {
-            String arg = args.get(i);
-            switch (arg) {
-                case "-a":
-                    intent.setAction(requireValue(args, ++i, arg));
-                    break;
-                case "-d":
-                    data = Uri.parse(requireValue(args, ++i, arg));
-                    break;
-                case "-t":
-                    type = requireValue(args, ++i, arg);
-                    break;
-                case "-c":
-                    intent.addCategory(requireValue(args, ++i, arg));
-                    break;
-                case "-n": {
-                    ComponentName component = ComponentName.unflattenFromString(requireValue(args, ++i, arg));
-                    if (component == null) throw new IllegalArgumentException("invalid component");
-                    intent.setComponent(component);
-                    break;
-                }
-                case "-p":
-                    intent.setPackage(requireValue(args, ++i, arg));
-                    break;
-                case "-f":
-                    intent.setFlags(parseInteger(requireValue(args, ++i, arg)));
-                    break;
-                case "--activity-new-task":
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    break;
-                case "--activity-clear-top":
-                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                    break;
-                case "--activity-clear-task":
-                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                    break;
-                case "--activity-single-top":
-                    intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                    break;
-                case "--es": {
-                    String key = requireValue(args, ++i, arg);
-                    intent.putExtra(key, requireValue(args, ++i, arg));
-                    break;
-                }
-                case "--esn":
-                    intent.putExtra(requireValue(args, ++i, arg), (String) null);
-                    break;
-                case "--ei": {
-                    String key = requireValue(args, ++i, arg);
-                    intent.putExtra(key, Integer.parseInt(requireValue(args, ++i, arg)));
-                    break;
-                }
-                case "--el": {
-                    String key = requireValue(args, ++i, arg);
-                    intent.putExtra(key, Long.parseLong(requireValue(args, ++i, arg)));
-                    break;
-                }
-                case "--ef": {
-                    String key = requireValue(args, ++i, arg);
-                    intent.putExtra(key, Float.parseFloat(requireValue(args, ++i, arg)));
-                    break;
-                }
-                case "--ez": {
-                    String key = requireValue(args, ++i, arg);
-                    intent.putExtra(key, Boolean.parseBoolean(requireValue(args, ++i, arg)));
-                    break;
-                }
-                default:
-                    if (arg.startsWith("-")) {
-                        throw new IllegalArgumentException("unsupported intent option: " + arg);
-                    }
-                    data = Uri.parse(arg);
-                    break;
-            }
-        }
-        if (data != null || type != null) {
-            intent.setDataAndType(data, type);
-        }
-        return intent;
+    private static Application asApplication(Context context) {
+        Context applicationContext = context.getApplicationContext();
+        if (applicationContext instanceof Application) return (Application) applicationContext;
+        throw new IllegalStateException("application context is not an Application");
     }
 
     private static MiraCommandResult runSettings(Context context, List<String> argv) {

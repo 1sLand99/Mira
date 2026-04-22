@@ -19,3 +19,6 @@ rootProject.name = "Mira"
 include ":mira-app"
 
 project(":mira-app").projectDir = file("android/app")
+
+include ":termux-am-library"
+project(":termux-am-library").projectDir = file("third_party/termux-am-library/termux-am-library")

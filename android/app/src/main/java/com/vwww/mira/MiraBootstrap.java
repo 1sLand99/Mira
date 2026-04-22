@@ -117,6 +117,7 @@ public final class MiraBootstrap {
     private String homeProfileScript() {
         return "# Mira shell profile\n" +
             "[ -n \"$PREFIX\" ] && [ -f \"$PREFIX/etc/profile\" ] && . \"$PREFIX/etc/profile\"\n" +
+            "alias am='mira-am'\n" +
             "export PS1='mira $ '\n";
     }
 
@@ -131,6 +132,7 @@ public final class MiraBootstrap {
 
     private void writeMiraCommandWrappers() throws IOException {
         String[] commands = new String[] {
+            "am",
             "mira-am",
             "mira-settings",
             "mira-getprop",
