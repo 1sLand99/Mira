@@ -12,6 +12,13 @@ public interface MiraPtySession extends Closeable {
 
     void resize(int columns, int rows);
 
+    default void resize(int columns, int rows, int cellWidth, int cellHeight) {
+        resize(columns, rows);
+    }
+
+    default void setUtf8Mode() {
+    }
+
     int waitFor();
 
     String getBackendName();

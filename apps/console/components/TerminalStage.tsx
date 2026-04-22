@@ -51,16 +51,27 @@ export function TerminalStage({
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   }, []);
 
+  const measureCellSize = useCallback(() => {
+    const terminal = terminalRef.current;
+    const host = terminalHost.current;
+    if (!terminal || !host || terminal.cols <= 0 || terminal.rows <= 0) return { cellWidth: 0, cellHeight: 0 };
+    return {
+      cellWidth: Math.max(Math.round(host.clientWidth / terminal.cols), 0),
+      cellHeight: Math.max(Math.round(host.clientHeight / terminal.rows), 0),
+    };
+  }, []);
+
   const fitAndResize = useCallback(() => {
     const terminal = terminalRef.current;
     const fit = fitRef.current;
     if (!terminal || !fit) return;
     fit.fit();
+    const { cellWidth, cellHeight } = measureCellSize();
     setSize({ cols: terminal.cols, rows: terminal.rows });
     if (sessionIdRef.current && deviceAttachedRef.current) {
-      send({ type: 'terminal.resize', sessionId: sessionIdRef.current, cols: terminal.cols, rows: terminal.rows });
+      send({ type: 'terminal.resize', sessionId: sessionIdRef.current, cols: terminal.cols, rows: terminal.rows, cellWidth, cellHeight });
     }
-  }, [send]);
+  }, [measureCellSize, send]);
 
   useEffect(() => {
     if (!terminalHost.current || terminalRef.current) return;
@@ -188,7 +199,8 @@ export function TerminalStage({
     record('session.open', device.installId);
     try {
       const terminal = terminalRef.current;
-      const opened = await openSession(device.installId, terminal?.cols || size.cols, terminal?.rows || size.rows);
+      const { cellWidth, cellHeight } = measureCellSize();
+      const opened = await openSession(device.installId, terminal?.cols || size.cols, terminal?.rows || size.rows, cellWidth, cellHeight);
       connectBrowser(device, opened.sessionId);
       onRefreshDevices();
     } catch (error) {
@@ -198,7 +210,7 @@ export function TerminalStage({
       record('open.failed', message);
       terminalRef.current?.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
     }
-  }, [connectBrowser, device, fitAndResize, onRefreshDevices, record, sessionStatus, size.cols, size.rows, transportStatus]);
+  }, [connectBrowser, device, fitAndResize, measureCellSize, onRefreshDevices, record, sessionStatus, size.cols, size.rows, transportStatus]);
 
   const handleClose = useCallback(async () => {
     const closingSession = sessionIdRef.current;

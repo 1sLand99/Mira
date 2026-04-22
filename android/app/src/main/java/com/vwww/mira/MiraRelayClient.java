@@ -22,6 +22,8 @@ public final class MiraRelayClient implements Closeable {
     private final String sessionId;
     private final int initialColumns;
     private final int initialRows;
+    private final int initialCellWidth;
+    private final int initialCellHeight;
     private final Runnable onClose;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -40,6 +42,8 @@ public final class MiraRelayClient implements Closeable {
         String sessionId,
         int initialColumns,
         int initialRows,
+        int initialCellWidth,
+        int initialCellHeight,
         Runnable onClose
     ) {
         this.context = context.getApplicationContext();
@@ -49,6 +53,8 @@ public final class MiraRelayClient implements Closeable {
         this.sessionId = sessionId;
         this.initialColumns = initialColumns <= 0 ? 80 : initialColumns;
         this.initialRows = initialRows <= 0 ? 24 : initialRows;
+        this.initialCellWidth = Math.max(initialCellWidth, 0);
+        this.initialCellHeight = Math.max(initialCellHeight, 0);
         this.onClose = onClose;
     }
 
@@ -68,8 +74,8 @@ public final class MiraRelayClient implements Closeable {
             if (!running.get()) return;
             toolbox = MiraToolbox.prepare(context, sessionId);
             if (!running.get()) return;
-            pty = MiraPtyFactory.create(context, bootstrap, initialRows, initialColumns, toolbox);
-            Log.i(TAG, "PTY started backend=" + pty.getBackendName() + " pid=" + pty.getPid() + " cols=" + initialColumns + " rows=" + initialRows);
+            pty = MiraPtyFactory.create(context, bootstrap, initialRows, initialColumns, initialCellWidth, initialCellHeight, toolbox);
+            Log.i(TAG, "PTY started backend=" + pty.getBackendName() + " pid=" + pty.getPid() + " cols=" + initialColumns + " rows=" + initialRows + " cellWidth=" + initialCellWidth + " cellHeight=" + initialCellHeight);
             if (!running.get()) return;
             MiraWebSocketConnection connected = MiraWebSocketConnection.connect(serverWs);
             if (!running.get()) {
@@ -137,7 +143,14 @@ public final class MiraRelayClient implements Closeable {
             byte[] data = Base64.decode(json.optString("dataBase64", ""), Base64.DEFAULT);
             if (pty != null) pty.write(data);
         } else if ("terminal.resize".equals(type)) {
-            if (pty != null) pty.resize(json.optInt("cols", 0), json.optInt("rows", 0));
+            if (pty != null) {
+                pty.resize(
+                    json.optInt("cols", 0),
+                    json.optInt("rows", 0),
+                    json.optInt("cellWidth", 0),
+                    json.optInt("cellHeight", 0)
+                );
+            }
         } else if ("session.close".equals(type)) {
             running.set(false);
         } else if ("error".equals(type)) {

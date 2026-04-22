@@ -21,12 +21,15 @@ extern int mira_pty_platform_spawn(const char *shell_path,
                                    char *const envp[],
                                    int rows,
                                    int columns,
+                                   int cell_width,
+                                   int cell_height,
                                    int *master_fd,
                                    pid_t *pid);
 
 extern ssize_t mira_pty_platform_read(int master_fd, void *buffer, size_t length);
 extern ssize_t mira_pty_platform_write(int master_fd, const void *buffer, size_t length);
-extern int mira_pty_platform_resize(int master_fd, int columns, int rows);
+extern int mira_pty_platform_resize(int master_fd, int columns, int rows, int cell_width, int cell_height);
+extern int mira_pty_platform_set_utf8_mode(int master_fd);
 extern int mira_pty_platform_wait_for(pid_t pid, int *status);
 extern int mira_pty_platform_kill(pid_t pid, int signal_number);
 extern int mira_pty_platform_close(int fd);
@@ -46,7 +49,9 @@ mira_pty_process_t *mira_pty_open(const char *shell_path,
                                   char *const argv[],
                                   char *const envp[],
                                   int rows,
-                                  int columns) {
+                                  int columns,
+                                  int cell_width,
+                                  int cell_height) {
     if (shell_path == NULL || shell_path[0] == '\0') {
         errno = EINVAL;
         return NULL;
@@ -59,7 +64,7 @@ mira_pty_process_t *mira_pty_open(const char *shell_path,
 
     int master_fd = -1;
     pid_t pid = -1;
-    if (mira_pty_platform_spawn(shell_path, cwd, argv, envp, rows, columns, &master_fd, &pid) != 0) {
+    if (mira_pty_platform_spawn(shell_path, cwd, argv, envp, rows, columns, cell_width, cell_height, &master_fd, &pid) != 0) {
         free(pty);
         return NULL;
     }
@@ -87,7 +92,7 @@ ssize_t mira_pty_write(mira_pty_process_t *pty, const void *buffer, size_t lengt
     return mira_pty_platform_write(pty->master_fd, buffer, length);
 }
 
-int mira_pty_resize(mira_pty_process_t *pty, int columns, int rows) {
+int mira_pty_resize(mira_pty_process_t *pty, int columns, int rows, int cell_width, int cell_height) {
     if (pty == NULL) {
         errno = EINVAL;
         return -1;
@@ -95,7 +100,18 @@ int mira_pty_resize(mira_pty_process_t *pty, int columns, int rows) {
     if (pty->master_fd < 0) {
         return 0;
     }
-    return mira_pty_platform_resize(pty->master_fd, columns, rows);
+    return mira_pty_platform_resize(pty->master_fd, columns, rows, cell_width, cell_height);
+}
+
+int mira_pty_set_utf8_mode(mira_pty_process_t *pty) {
+    if (pty == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (pty->master_fd < 0) {
+        return 0;
+    }
+    return mira_pty_platform_set_utf8_mode(pty->master_fd);
 }
 
 int mira_pty_wait_for(mira_pty_process_t *pty) {

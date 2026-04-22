@@ -49,8 +49,8 @@ export function listDevices(): Promise<DevicesResponse> {
   return request<DevicesResponse>('/api/devices');
 }
 
-export function openSession(installId: string, cols: number, rows: number): Promise<OpenSessionResponse> {
-  return request<OpenSessionResponse>('/api/open', { installId, cols, rows }, { acceptActiveSessionConflict: true });
+export function openSession(installId: string, cols: number, rows: number, cellWidth = 0, cellHeight = 0): Promise<OpenSessionResponse> {
+  return request<OpenSessionResponse>('/api/open', { installId, cols, rows, cellWidth, cellHeight }, { acceptActiveSessionConflict: true });
 }
 
 export function closeSession(sessionId: string): Promise<{ ok: boolean }> {

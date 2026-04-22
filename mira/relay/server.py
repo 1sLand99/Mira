@@ -348,6 +348,8 @@ async def api_open(state: RelayState, body: dict[str, Any]) -> bytes:
         "serverWs": relay_ws_url(str(record.data.get("relayUrl") or state.advertise_url), "/ws/device"),
         "cols": int(body.get("cols") or 120),
         "rows": int(body.get("rows") or 36),
+        "cellWidth": int(body.get("cellWidth") or 0),
+        "cellHeight": int(body.get("cellHeight") or 0),
     }
     if control_writer is not None and not control_writer.is_closing():
         try:

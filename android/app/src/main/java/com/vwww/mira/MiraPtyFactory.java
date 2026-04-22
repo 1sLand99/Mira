@@ -17,6 +17,18 @@ public final class MiraPtyFactory {
         return create(MiraPtyLaunchSpec.of(context, bootstrap, rows, columns, toolbox));
     }
 
+    public static MiraPtySession create(
+        Context context,
+        MiraBootstrap bootstrap,
+        int rows,
+        int columns,
+        int cellWidth,
+        int cellHeight,
+        MiraToolbox toolbox
+    ) {
+        return create(MiraPtyLaunchSpec.of(context, bootstrap, rows, columns, cellWidth, cellHeight, toolbox));
+    }
+
     public static MiraPtySession create(MiraPtyLaunchSpec spec) {
         try {
             MiraPtySession nativeSession = new MiraPtyProcess(spec);

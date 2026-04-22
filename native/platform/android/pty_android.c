@@ -29,12 +29,51 @@
 #include <pty.h>
 #endif
 
-static int mira_pty_set_window_size(int fd, int rows, int columns) {
+static unsigned short mira_pty_clamp_size(int value, unsigned short fallback) {
+    if (value <= 0) {
+        return fallback;
+    }
+    if (value > 65535) {
+        return 65535;
+    }
+    return (unsigned short) value;
+}
+
+static unsigned short mira_pty_pixel_size(int cells, int cell_size) {
+    if (cells <= 0 || cell_size <= 0) {
+        return 0;
+    }
+    long pixels = (long) cells * (long) cell_size;
+    if (pixels > 65535L) {
+        return 65535;
+    }
+    return (unsigned short) pixels;
+}
+
+static int mira_pty_set_window_size(int fd, int rows, int columns, int cell_width, int cell_height) {
     struct winsize size;
     memset(&size, 0, sizeof(size));
-    size.ws_row = (unsigned short) (rows > 0 ? rows : 1);
-    size.ws_col = (unsigned short) (columns > 0 ? columns : 1);
+    size.ws_row = mira_pty_clamp_size(rows, 1);
+    size.ws_col = mira_pty_clamp_size(columns, 1);
+    size.ws_xpixel = mira_pty_pixel_size(columns, cell_width);
+    size.ws_ypixel = mira_pty_pixel_size(rows, cell_height);
     return ioctl(fd, TIOCSWINSZ, &size);
+}
+
+static int mira_pty_set_utf8_mode_fd(int fd) {
+#ifdef IUTF8
+    struct termios tios;
+    if (tcgetattr(fd, &tios) != 0) {
+        return -1;
+    }
+    if ((tios.c_iflag & IUTF8) == 0) {
+        tios.c_iflag |= IUTF8;
+        return tcsetattr(fd, TCSANOW, &tios);
+    }
+#else
+    (void) fd;
+#endif
+    return 0;
 }
 
 static void mira_pty_configure_termios(int fd) {
@@ -81,8 +120,11 @@ static void mira_pty_make_controlling_terminal(int slave_fd) {
     (void) tcsetpgrp(slave_fd, getpgrp());
 }
 
-static void mira_pty_apply_environment(char *const envp[]) {
+static void mira_pty_clear_environment(void) {
     extern char **environ;
+    if (clearenv() == 0) {
+        return;
+    }
     if (environ != NULL) {
         size_t count = 0;
         for (char **cursor = environ; *cursor != NULL; ++cursor) {
@@ -115,7 +157,10 @@ static void mira_pty_apply_environment(char *const envp[]) {
             free(names);
         }
     }
+}
 
+static void mira_pty_apply_environment(char *const envp[]) {
+    mira_pty_clear_environment();
     if (envp == NULL) {
         return;
     }
@@ -130,6 +175,8 @@ int mira_pty_platform_spawn(const char *shell_path,
                             char *const envp[],
                             int rows,
                             int columns,
+                            int cell_width,
+                            int cell_height,
                             int *master_fd,
                             pid_t *pid) {
     if (master_fd == NULL || pid == NULL || shell_path == NULL || shell_path[0] == '\0') {
@@ -160,7 +207,7 @@ int mira_pty_platform_spawn(const char *shell_path,
 
     mira_pty_configure_termios(ptm);
 
-    if (mira_pty_set_window_size(ptm, rows, columns) != 0) {
+    if (mira_pty_set_window_size(ptm, rows, columns, cell_width, cell_height) != 0) {
         int saved_errno = errno;
         if (pts >= 0) {
             close(pts);
@@ -282,12 +329,20 @@ ssize_t mira_pty_platform_write(int master_fd, const void *buffer, size_t length
     return (ssize_t) length;
 }
 
-int mira_pty_platform_resize(int master_fd, int columns, int rows) {
+int mira_pty_platform_resize(int master_fd, int columns, int rows, int cell_width, int cell_height) {
     if (master_fd < 0) {
         errno = EBADF;
         return -1;
     }
-    return mira_pty_set_window_size(master_fd, rows, columns);
+    return mira_pty_set_window_size(master_fd, rows, columns, cell_width, cell_height);
+}
+
+int mira_pty_platform_set_utf8_mode(int master_fd) {
+    if (master_fd < 0) {
+        errno = EBADF;
+        return -1;
+    }
+    return mira_pty_set_utf8_mode_fd(master_fd);
 }
 
 int mira_pty_platform_wait_for(pid_t pid, int *status) {

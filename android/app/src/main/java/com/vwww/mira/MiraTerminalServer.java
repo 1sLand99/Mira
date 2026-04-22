@@ -283,7 +283,7 @@ public final class MiraTerminalServer implements Closeable {
             if ("input".equals(type)) {
                 pty.write(json.optString("data", "").getBytes(StandardCharsets.UTF_8));
             } else if ("resize".equals(type)) {
-                pty.resize(json.optInt("cols", 0), json.optInt("rows", 0));
+                pty.resize(json.optInt("cols", 0), json.optInt("rows", 0), json.optInt("cellWidth", 0), json.optInt("cellHeight", 0));
             }
         } catch (JSONException ignored) {
         }

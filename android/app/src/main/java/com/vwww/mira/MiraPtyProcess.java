@@ -1,28 +1,50 @@
 package com.vwww.mira;
 
+import android.util.Log;
+
 import java.io.IOException;
 
 public final class MiraPtyProcess implements MiraPtySession {
+    private static final String TAG = "MiraPtyProcess";
+
     static {
         System.loadLibrary("mira_pty");
     }
 
     private final long handle;
     private final int pid;
+    private final int cellWidth;
+    private final int cellHeight;
     private volatile boolean closed;
 
     public MiraPtyProcess(MiraPtyLaunchSpec spec) {
-        this(spec.getShellPath(), spec.getCwd(), spec.getArgs(), spec.getEnv(), spec.getRows(), spec.getColumns());
+        this(
+            spec.getShellPath(),
+            spec.getCwd(),
+            spec.getArgs(),
+            spec.getEnv(),
+            spec.getRows(),
+            spec.getColumns(),
+            spec.getCellWidth(),
+            spec.getCellHeight()
+        );
     }
 
     public MiraPtyProcess(String shellPath, String cwd, String[] args, String[] env, int rows, int columns) {
-        handle = nativeOpen(shellPath, cwd, args, env, rows, columns);
+        this(shellPath, cwd, args, env, rows, columns, 0, 0);
+    }
+
+    public MiraPtyProcess(String shellPath, String cwd, String[] args, String[] env, int rows, int columns, int cellWidth, int cellHeight) {
+        this.cellWidth = Math.max(cellWidth, 0);
+        this.cellHeight = Math.max(cellHeight, 0);
+        handle = nativeOpen(shellPath, cwd, args, env, rows, columns, this.cellWidth, this.cellHeight);
         if (handle == 0) throw new IllegalStateException("native PTY open returned null handle");
         pid = nativePid(handle);
         if (pid <= 0) {
             nativeClose(handle);
             throw new IllegalStateException("native PTY open returned invalid pid");
         }
+        applyUtf8ModeBestEffort();
     }
 
     @Override
@@ -44,8 +66,28 @@ public final class MiraPtyProcess implements MiraPtySession {
 
     @Override
     public void resize(int columns, int rows) {
+        resize(columns, rows, cellWidth, cellHeight);
+    }
+
+    @Override
+    public void resize(int columns, int rows, int cellWidth, int cellHeight) {
         if (columns <= 0 || rows <= 0 || closed) return;
-        nativeResize(handle, columns, rows);
+        nativeResize(handle, columns, rows, Math.max(cellWidth, 0), Math.max(cellHeight, 0));
+        applyUtf8ModeBestEffort();
+    }
+
+    @Override
+    public void setUtf8Mode() {
+        if (closed) return;
+        nativeSetUtf8Mode(handle);
+    }
+
+    private void applyUtf8ModeBestEffort() {
+        try {
+            setUtf8Mode();
+        } catch (RuntimeException failure) {
+            Log.w(TAG, "Unable to refresh PTY UTF-8 mode", failure);
+        }
     }
 
     @Override
@@ -66,13 +108,15 @@ public final class MiraPtyProcess implements MiraPtySession {
         nativeClose(handle);
     }
 
-    private static native long nativeOpen(String shellPath, String cwd, String[] args, String[] env, int rows, int columns);
+    private static native long nativeOpen(String shellPath, String cwd, String[] args, String[] env, int rows, int columns, int cellWidth, int cellHeight);
 
     private static native int nativeRead(long handle, byte[] buffer, int length) throws IOException;
 
     private static native void nativeWrite(long handle, byte[] data, int length) throws IOException;
 
-    private static native void nativeResize(long handle, int columns, int rows);
+    private static native void nativeResize(long handle, int columns, int rows, int cellWidth, int cellHeight);
+
+    private static native void nativeSetUtf8Mode(long handle);
 
     private static native int nativeWaitFor(long handle);
 

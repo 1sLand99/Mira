@@ -284,6 +284,8 @@ public final class MiraDiscoveryService extends Service {
             sessionId,
             body.optInt("cols", 80),
             body.optInt("rows", 24),
+            body.optInt("cellWidth", 0),
+            body.optInt("cellHeight", 0),
             () -> onRelayClosed(sessionId)
         );
         relayClient.start();

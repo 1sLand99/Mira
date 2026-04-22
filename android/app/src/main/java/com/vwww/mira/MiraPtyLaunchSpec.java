@@ -11,6 +11,8 @@ public final class MiraPtyLaunchSpec {
     private final String[] env;
     private final int rows;
     private final int columns;
+    private final int cellWidth;
+    private final int cellHeight;
 
     private MiraPtyLaunchSpec(
         String shellPath,
@@ -18,7 +20,9 @@ public final class MiraPtyLaunchSpec {
         String[] args,
         String[] env,
         int rows,
-        int columns
+        int columns,
+        int cellWidth,
+        int cellHeight
     ) {
         this.shellPath = shellPath;
         this.cwd = cwd;
@@ -26,6 +30,8 @@ public final class MiraPtyLaunchSpec {
         this.env = env == null ? new String[0] : env.clone();
         this.rows = rows;
         this.columns = columns;
+        this.cellWidth = cellWidth;
+        this.cellHeight = cellHeight;
     }
 
     public static MiraPtyLaunchSpec of(
@@ -33,6 +39,18 @@ public final class MiraPtyLaunchSpec {
         MiraBootstrap bootstrap,
         int rows,
         int columns,
+        MiraToolbox toolbox
+    ) {
+        return of(context, bootstrap, rows, columns, 0, 0, toolbox);
+    }
+
+    public static MiraPtyLaunchSpec of(
+        Context context,
+        MiraBootstrap bootstrap,
+        int rows,
+        int columns,
+        int cellWidth,
+        int cellHeight,
         MiraToolbox toolbox
     ) {
         File shell = bootstrap.getShellPath();
@@ -66,7 +84,7 @@ public final class MiraPtyLaunchSpec {
             "MIRA_APP_PACKAGE=" + context.getPackageName(),
             "ENV=" + home + "/.profile"
         };
-        return new MiraPtyLaunchSpec(shell.getAbsolutePath(), home, args, env, rows, columns);
+        return new MiraPtyLaunchSpec(shell.getAbsolutePath(), home, args, env, rows, columns, cellWidth, cellHeight);
     }
 
     public String getShellPath() {
@@ -91,5 +109,13 @@ public final class MiraPtyLaunchSpec {
 
     public int getColumns() {
         return columns;
+    }
+
+    public int getCellWidth() {
+        return cellWidth;
+    }
+
+    public int getCellHeight() {
+        return cellHeight;
     }
 }

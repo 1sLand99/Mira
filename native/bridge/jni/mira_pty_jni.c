@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,6 +19,28 @@ static void mira_jni_throw_io_exception(JNIEnv *env, const char *message) {
     if (exception_class != NULL) {
         (*env)->ThrowNew(env, exception_class, message == NULL ? "native PTY I/O error" : message);
     }
+}
+
+static void mira_jni_throw_runtime_errno(JNIEnv *env, const char *operation, int saved_errno) {
+    char message[512];
+    snprintf(message,
+             sizeof(message),
+             "%s: errno=%d (%s)",
+             operation == NULL ? "native PTY error" : operation,
+             saved_errno,
+             strerror(saved_errno));
+    mira_jni_throw_runtime_exception(env, message);
+}
+
+static void mira_jni_throw_io_errno(JNIEnv *env, const char *operation, int saved_errno) {
+    char message[512];
+    snprintf(message,
+             sizeof(message),
+             "%s: errno=%d (%s)",
+             operation == NULL ? "native PTY I/O error" : operation,
+             saved_errno,
+             strerror(saved_errno));
+    mira_jni_throw_io_exception(env, message);
 }
 
 static char **mira_jni_copy_string_array(JNIEnv *env, jobjectArray array) {
@@ -97,7 +120,9 @@ JNIEXPORT jlong JNICALL Java_com_vwww_mira_MiraPtyProcess_nativeOpen(JNIEnv *env
                                                                            jobjectArray args,
                                                                            jobjectArray env_vars,
                                                                            jint rows,
-                                                                           jint columns) {
+                                                                           jint columns,
+                                                                           jint cell_width,
+                                                                           jint cell_height) {
     (void) thiz;
 
     char *shell_path_copy = mira_jni_copy_string(env, shell_path);
@@ -122,7 +147,10 @@ JNIEXPORT jlong JNICALL Java_com_vwww_mira_MiraPtyProcess_nativeOpen(JNIEnv *env
                                             args_copy,
                                             env_copy,
                                             (int) rows,
-                                            (int) columns);
+                                            (int) columns,
+                                            (int) cell_width,
+                                            (int) cell_height);
+    int saved_errno = errno;
 
     mira_jni_free_string_array(args_copy);
     mira_jni_free_string_array(env_copy);
@@ -130,7 +158,7 @@ JNIEXPORT jlong JNICALL Java_com_vwww_mira_MiraPtyProcess_nativeOpen(JNIEnv *env
     free(cwd_copy);
 
     if (pty == NULL) {
-        mira_jni_throw_runtime_exception(env, "Failed to create PTY subprocess");
+        mira_jni_throw_runtime_errno(env, "Failed to create PTY subprocess", saved_errno);
         return 0;
     }
 
@@ -141,15 +169,32 @@ JNIEXPORT void JNICALL Java_com_vwww_mira_MiraPtyProcess_nativeResize(JNIEnv *en
                                                                             jobject thiz,
                                                                             jlong handle,
                                                                             jint columns,
-                                                                            jint rows) {
-    (void) env;
+                                                                            jint rows,
+                                                                            jint cell_width,
+                                                                            jint cell_height) {
     (void) thiz;
 
     mira_pty_process_t *pty = mira_jni_handle_to_pty(handle);
     if (pty == NULL) {
         return;
     }
-    (void) mira_pty_resize(pty, (int) columns, (int) rows);
+    if (mira_pty_resize(pty, (int) columns, (int) rows, (int) cell_width, (int) cell_height) != 0) {
+        mira_jni_throw_runtime_errno(env, "PTY resize failed", errno);
+    }
+}
+
+JNIEXPORT void JNICALL Java_com_vwww_mira_MiraPtyProcess_nativeSetUtf8Mode(JNIEnv *env,
+                                                                                  jobject thiz,
+                                                                                  jlong handle) {
+    (void) thiz;
+
+    mira_pty_process_t *pty = mira_jni_handle_to_pty(handle);
+    if (pty == NULL) {
+        return;
+    }
+    if (mira_pty_set_utf8_mode(pty) != 0) {
+        mira_jni_throw_runtime_errno(env, "PTY UTF-8 mode update failed", errno);
+    }
 }
 
 JNIEXPORT jint JNICALL Java_com_vwww_mira_MiraPtyProcess_nativeRead(JNIEnv *env,
@@ -180,9 +225,10 @@ JNIEXPORT jint JNICALL Java_com_vwww_mira_MiraPtyProcess_nativeRead(JNIEnv *env,
     }
 
     ssize_t result = mira_pty_read(pty, bytes, (size_t) length);
+    int saved_errno = errno;
     (*env)->ReleaseByteArrayElements(env, buffer, bytes, result < 0 ? JNI_ABORT : 0);
     if (result < 0) {
-        mira_jni_throw_io_exception(env, "PTY read failed");
+        mira_jni_throw_io_errno(env, "PTY read failed", saved_errno);
         return -1;
     }
     if (result == 0) {
@@ -219,9 +265,12 @@ JNIEXPORT void JNICALL Java_com_vwww_mira_MiraPtyProcess_nativeWrite(JNIEnv *env
     }
 
     ssize_t result = mira_pty_write(pty, bytes, (size_t) length);
+    int saved_errno = errno;
     (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-    if (result < 0 || result != length) {
-        mira_jni_throw_io_exception(env, "PTY write failed");
+    if (result < 0) {
+        mira_jni_throw_io_errno(env, "PTY write failed", saved_errno);
+    } else if (result != (ssize_t) length) {
+        mira_jni_throw_io_exception(env, "PTY write failed: short write");
     }
 }
 
