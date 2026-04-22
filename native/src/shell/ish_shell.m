@@ -308,7 +308,7 @@ static int mira_ish_boot_locked(void) {
     (void) do_mount(&devptsfs, "devpts", "/dev/pts", "", 0);
     err = mira_ish_hostfs_mount();
     if (err < 0) {
-        mira_ish_set_error("iSH Mira hostfs mount failed: %s", strerror(-err));
+        mira_ish_set_error("iSH Mira filesystem mount failed: %s", strerror(-err));
         g_ish_boot_errno = EIO;
         errno = EIO;
         return -1;
