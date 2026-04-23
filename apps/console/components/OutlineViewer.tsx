@@ -51,12 +51,8 @@ export function OutlineViewer({ outline, className }: { outline?: Outline | null
 
   if (!hasOutline) {
     return (
-      <div className={clsx('grid h-full min-h-[420px] place-items-center bg-[#111] p-6 text-center font-mono text-[#d8d8d8]', className)}>
-        <div>
-          <div className="mx-auto mb-4 h-16 w-10 border border-[#2fd0a6]" />
-          <div className="text-[13px] font-semibold">No outline available</div>
-          <div className="mt-2 max-w-[220px] text-[11px] leading-5 text-[#888]">设备暂未上报 UI 轮廓. 保持 Mira 前台连接后刷新设备状态.</div>
-        </div>
+      <div className={clsx('grid h-full min-h-[420px] place-items-center bg-[#777] p-6 text-center font-mono text-white', className)}>
+        <div className="text-[13px] font-semibold tracking-[0.08em]">Device is not in foreground</div>
       </div>
     );
   }

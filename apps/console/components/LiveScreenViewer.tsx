@@ -60,11 +60,11 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
   const pendingInputRequestsRef = useRef(new Set<string>());
   const [info, setInfo] = useState<ScreenVideoInfo | null>(null);
   const [status, setStatus] = useState<LiveStatus>('connecting');
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [, setInputStatus] = useState('input ready');
-  const [lastSeq, setLastSeq] = useState(0);
+  const [, setLastSeq] = useState(0);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -91,7 +91,7 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
         setError('WebCodecs unavailable');
         setDebugInfo({
           title: 'WebCodecs unavailable',
-          message: '当前浏览器没有 VideoDecoder 或 EncodedVideoChunk, 无法解 H.264.',
+          message: 'This browser does not provide VideoDecoder or EncodedVideoChunk, so H.264 cannot be decoded.',
           at: new Date().toLocaleTimeString(),
         });
         return;
@@ -545,6 +545,7 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
   const lastFrameAge = lastFrameAtRef.current ? now - lastFrameAtRef.current : 0;
   const stale = status === 'live' && lastFrameAge > STALE_MS;
   const showCanvas = Boolean(info && status === 'live');
+  const showInactiveOverlay = !showCanvas || stale || status !== 'live';
 
   return (
     <div
@@ -573,6 +574,11 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
       />
       <div className={clsx('absolute inset-0', showCanvas && 'hidden')}>{fallback}</div>
       <canvas ref={canvasRef} className={clsx('absolute inset-0 h-full w-full object-contain', !showCanvas && 'opacity-0')} />
+      {showInactiveOverlay ? (
+        <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-[#777]/85 p-6 text-center font-mono text-white">
+          <div className="text-[13px] font-semibold tracking-[0.08em]">Device is not in foreground</div>
+        </div>
+      ) : null}
       {debugInfo ? (
         <button
           type="button"
@@ -607,21 +613,6 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
           <DebugRow label="state" value={debugInfo.decoderState} />
           <DebugRow label="head" value={debugInfo.packetHead} />
           <DebugRow label="at" value={debugInfo.at} />
-        </div>
-      ) : null}
-      <div className="pointer-events-none absolute bottom-2 left-2 max-w-[calc(100%-16px)] border border-[#2d2d2d] bg-[#111]/85 px-2 py-1 font-mono text-[11px] leading-4 text-[#d8d8d8]">
-        <span className={stale || status === 'error' || status === 'unsupported' ? 'text-[#ffcf70]' : status === 'live' ? 'text-[#54d6bd]' : 'text-[#cfcfcf]'}>
-          {stale ? 'stale' : status === 'live' ? 'h264' : status}
-        </span>
-        {info?.width && info?.height ? <span> · {info.width} x {info.height}</span> : null}
-        {info?.bitrate ? <span> · {Math.round(info.bitrate / 1000)} kbps</span> : null}
-        {info?.fps ? <span> · {info.fps} fps</span> : null}
-        {lastSeq ? <span> · seq {lastSeq}</span> : null}
-        {lastFrameAtRef.current ? <span> · age {Math.round(lastFrameAge)} ms</span> : null}
-      </div>
-      {error || stale ? (
-        <div className="pointer-events-none absolute right-2 top-2 border border-[#6f5a24] bg-[#1f1a0d]/85 px-2 py-1 font-mono text-[11px] text-[#ffcf70]">
-          {stale ? 'video stale' : error}
         </div>
       ) : null}
     </div>

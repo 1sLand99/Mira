@@ -178,7 +178,6 @@ export function TerminalStage({
       } else if (message.type === 'error') {
         setTransportStatus('error');
         record('error', message.error || 'unknown error');
-        terminalRef.current?.writeln(`\r\n\x1b[31m${message.error || 'relay error'}\x1b[0m`);
       }
     });
     socket.addEventListener('close', () => {
@@ -213,12 +212,10 @@ export function TerminalStage({
       connectBrowser(device, opened.sessionId);
       onRefreshDevices();
     } catch (error) {
-      autoOpenDeviceRef.current = null;
       setSessionStatus('error');
       setTransportStatus('error');
       const message = error instanceof Error ? error.message : String(error);
       record('open.failed', message);
-      terminalRef.current?.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
     }
   }, [connectBrowser, device, fitAndResize, measureCellSize, onRefreshDevices, record, sessionStatus, size.cols, size.rows, transportStatus]);
 
