@@ -18,6 +18,14 @@ const char *mira_pty_ios_backend_name(void);
 typedef void (*mira_ios_screen_input_callback_t)(const char *json, void *context);
 
 int mira_ios_relay_start(const char *relay_url, const char *device_name, const char *home_dir);
+int mira_ios_relay_start_with_device_info(
+    const char *relay_url,
+    const char *device_name,
+    const char *home_dir,
+    const char *device_model,
+    const char *hardware_model,
+    const char *os_version
+);
 void mira_ios_relay_stop(void);
 const char *mira_ios_relay_status(void);
 const char *mira_ios_relay_install_id(void);

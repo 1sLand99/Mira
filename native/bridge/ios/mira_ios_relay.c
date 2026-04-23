@@ -47,6 +47,9 @@ typedef struct mira_ios_relay_state {
     mira_ws_connection_t *control;
     char relay_url[1024];
     char device_name[128];
+    char device_model[128];
+    char hardware_model[64];
+    char os_version[64];
     char home_dir[PATH_MAX];
     char install_id[64];
     char status[256];
@@ -77,6 +80,9 @@ static mira_ios_relay_state_t g_relay = {
     .control = NULL,
     .relay_url = {0},
     .device_name = {0},
+    .device_model = {0},
+    .hardware_model = {0},
+    .os_version = {0},
     .home_dir = {0},
     .install_id = {0},
     .status = "idle",
@@ -801,10 +807,13 @@ static void mira_start_session_from_json(const char *json) {
 
 static void *mira_control_thread(void *arg) {
     (void) arg;
-    char relay_url[1024], device_name[128], home_dir[PATH_MAX], install_id[64];
+    char relay_url[1024], device_name[128], device_model[128], hardware_model[64], os_version[64], home_dir[PATH_MAX], install_id[64];
     pthread_mutex_lock(&g_relay.mutex);
     snprintf(relay_url, sizeof(relay_url), "%s", g_relay.relay_url);
     snprintf(device_name, sizeof(device_name), "%s", g_relay.device_name);
+    snprintf(device_model, sizeof(device_model), "%s", g_relay.device_model);
+    snprintf(hardware_model, sizeof(hardware_model), "%s", g_relay.hardware_model);
+    snprintf(os_version, sizeof(os_version), "%s", g_relay.os_version);
     snprintf(home_dir, sizeof(home_dir), "%s", g_relay.home_dir);
     snprintf(install_id, sizeof(install_id), "%s", g_relay.install_id);
     pthread_mutex_unlock(&g_relay.mutex);
@@ -824,14 +833,20 @@ static void *mira_control_thread(void *arg) {
             sleep(MIRA_IOS_RELAY_RETRY_SECONDS);
             continue;
         }
-        char escaped_device[256], escaped_relay[1200];
+        char escaped_device[256], escaped_model[256], escaped_hardware[128], escaped_os_version[128], escaped_relay[1200];
         mira_json_escape(device_name, escaped_device, sizeof(escaped_device));
+        mira_json_escape(device_model, escaped_model, sizeof(escaped_model));
+        mira_json_escape(hardware_model, escaped_hardware, sizeof(escaped_hardware));
+        mira_json_escape(os_version, escaped_os_version, sizeof(escaped_os_version));
         mira_json_escape(relay_url, escaped_relay, sizeof(escaped_relay));
-        char register_json[2048];
+        char register_json[2560];
         snprintf(register_json, sizeof(register_json),
-                 "{\"type\":\"device.register\",\"protocol\":1,\"installId\":\"%s\",\"deviceName\":\"%s\",\"packageName\":\"com.vwww.mira.ios\",\"model\":\"iOS\",\"sdk\":16,\"arch\":\"arm64\",\"state\":\"idle\",\"transport\":\"control\",\"relayUrl\":\"%s\"}",
+                 "{\"type\":\"device.register\",\"protocol\":1,\"installId\":\"%s\",\"deviceName\":\"%s\",\"packageName\":\"com.vwww.mira.ios\",\"platform\":\"ios\",\"osName\":\"iOS\",\"osVersion\":\"%s\",\"screenSource\":\"app-key-window\",\"model\":\"%s\",\"hardwareModel\":\"%s\",\"arch\":\"arm64\",\"state\":\"idle\",\"transport\":\"control\",\"relayUrl\":\"%s\"}",
                  install_id,
                  escaped_device[0] ? escaped_device : "iPhone",
+                 escaped_os_version,
+                 escaped_model[0] ? escaped_model : "iPhone",
+                 escaped_hardware,
                  escaped_relay);
         if (mira_ws_send_text(ws, register_json) != 0) {
             mira_status_set("control register failed");
@@ -891,7 +906,14 @@ done:
     return NULL;
 }
 
-int mira_ios_relay_start(const char *relay_url, const char *device_name, const char *home_dir) {
+int mira_ios_relay_start_with_device_info(
+    const char *relay_url,
+    const char *device_name,
+    const char *home_dir,
+    const char *device_model,
+    const char *hardware_model,
+    const char *os_version
+) {
     if (relay_url == NULL || relay_url[0] == '\0') {
         mira_status_set("relay url required");
         errno = EINVAL;
@@ -904,6 +926,9 @@ int mira_ios_relay_start(const char *relay_url, const char *device_name, const c
     }
     snprintf(g_relay.relay_url, sizeof(g_relay.relay_url), "%s", relay_url);
     snprintf(g_relay.device_name, sizeof(g_relay.device_name), "%s", device_name == NULL || device_name[0] == '\0' ? "iPhone" : device_name);
+    snprintf(g_relay.device_model, sizeof(g_relay.device_model), "%s", device_model == NULL || device_model[0] == '\0' ? "iPhone" : device_model);
+    snprintf(g_relay.hardware_model, sizeof(g_relay.hardware_model), "%s", hardware_model == NULL ? "" : hardware_model);
+    snprintf(g_relay.os_version, sizeof(g_relay.os_version), "%s", os_version == NULL ? "" : os_version);
     snprintf(g_relay.home_dir, sizeof(g_relay.home_dir), "%s", home_dir == NULL || home_dir[0] == '\0' ? "/tmp" : home_dir);
     mira_load_install_id(g_relay.home_dir, g_relay.install_id, sizeof(g_relay.install_id));
     g_relay.running = 1;
@@ -918,6 +943,10 @@ int mira_ios_relay_start(const char *relay_url, const char *device_name, const c
     }
     mira_status_set("starting");
     return 0;
+}
+
+int mira_ios_relay_start(const char *relay_url, const char *device_name, const char *home_dir) {
+    return mira_ios_relay_start_with_device_info(relay_url, device_name, home_dir, device_name, "", "");
 }
 
 void mira_ios_relay_stop(void) {

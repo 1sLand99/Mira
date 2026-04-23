@@ -336,6 +336,10 @@ def device_payload(record: DeviceRecord) -> dict[str, Any]:
         data["outline"] = record.outline
     if record.outline_last_seen is not None:
         data["outlineLastSeen"] = record.outline_last_seen
+    if record.screen_info is not None:
+        data["screenInfo"] = record.screen_info
+    if record.screen_last_seen is not None:
+        data["screenLastSeen"] = record.screen_last_seen
     if record.metrics is not None:
         data["metrics"] = record.metrics
     if record.metrics_last_seen is not None:

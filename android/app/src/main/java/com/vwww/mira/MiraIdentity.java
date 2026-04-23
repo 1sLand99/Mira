@@ -58,6 +58,9 @@ public final class MiraIdentity {
         json.put("installId", getInstallId());
         json.put("deviceName", deviceName == null || deviceName.trim().isEmpty() ? defaultDeviceName() : deviceName.trim());
         json.put("packageName", context.getPackageName());
+        json.put("platform", "android");
+        json.put("osName", "Android");
+        json.put("osVersion", Build.VERSION.RELEASE == null ? "" : Build.VERSION.RELEASE);
         json.put("androidIdHash", androidIdHash());
         json.put("model", defaultDeviceName());
         json.put("sdk", Build.VERSION.SDK_INT);

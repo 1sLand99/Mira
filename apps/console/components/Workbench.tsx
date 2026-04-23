@@ -157,20 +157,13 @@ function clampPaneSize(value: number, min: number, max: number) {
 }
 
 function InfoPanel({ device }: { device: MiraDevice }) {
-  const screen = device.outline?.screen;
-  const screenText = screen?.width && screen?.height ? `${screen.width} x ${screen.height}` : 'unknown';
-  const rows: Array<[string, string]> = [
-    ['Architecture', device.arch || 'unknown'],
-    ['Model', device.model || device.deviceName || 'unknown'],
-    ['Device ID', shortId(device.installId, 36)],
-    ['Screen', screenText],
-    ['Components', String(device.outline?.nodeCount ?? device.outline?.nodes?.length ?? 'unknown')],
-    ['Outline', device.outline?.stale ? `stale: ${device.outline.staleReason || 'cached'}` : device.outline?.available === false ? device.outline.reason || 'unavailable' : 'live'],
-    ['Proxy', 'none'],
-    ['Cur Application', device.packageName || 'unknown'],
-    ['Cur Activity', device.outline?.activityName || 'unknown'],
-    ['Status', device.state || 'unknown'],
-  ];
+  const platform = devicePlatform(device);
+  const rows: Array<[string, string]> = [];
+  addKnownRow(rows, 'Architecture', device.arch);
+  addKnownRow(rows, 'Model', modelSummary(device));
+  rows.push(['Device ID', shortId(device.installId, 36)]);
+  addKnownRow(rows, 'Screen', screenStateText(device));
+  rows.push(...currentSurfaceRows(device, platform));
 
   return (
     <section className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_180px] border-t border-[#cfcfcf] bg-[#f5f5f5] text-[#111]">
@@ -189,6 +182,111 @@ function InfoPanel({ device }: { device: MiraDevice }) {
       <DeviceMetricsPanel device={device} />
     </section>
   );
+}
+
+function addKnownRow(rows: Array<[string, string]>, key: string, value: string | number | null | undefined) {
+  if (value === null || value === undefined) return;
+  const text = String(value).trim();
+  if (!text || text === 'unknown' || text === 'not reported') return;
+  rows.push([key, text]);
+}
+
+type DevicePlatform = 'android' | 'ios' | 'unknown';
+
+function devicePlatform(device: MiraDevice): DevicePlatform {
+  const platform = `${device.platform || ''} ${device.osName || ''}`.toLowerCase();
+  if (platform.includes('ios')) return 'ios';
+  if (platform.includes('android')) return 'android';
+
+  const model = String(device.model || '').toLowerCase();
+  const packageName = String(device.packageName || '').toLowerCase();
+  if (model === 'ios' || model.includes('iphone') || model.includes('ipad') || packageName.endsWith('.ios')) return 'ios';
+  if (device.androidIdHash || device.outline?.activityName) return 'android';
+  return 'unknown';
+}
+
+function modelSummary(device: MiraDevice) {
+  const model = String(device.model || device.deviceName || '').trim();
+  if (!model) return null;
+  const details = [systemVersionText(device), screenSizeText(device)].filter(Boolean);
+  if (!details.length) return model;
+  return `${model} (${details.join(', ')})`;
+}
+
+function systemVersionText(device: MiraDevice): string | null {
+  const osName = String(device.osName || device.platform || '').trim();
+  const osVersion = String(device.osVersion || '').trim();
+  if (osName && osVersion) return `${osName} ${osVersion}`;
+  if (osVersion) return osVersion;
+  if (isAndroidDevice(device) && device.sdk) return androidVersionText(device.sdk);
+  return null;
+}
+
+function isAndroidDevice(device: MiraDevice) {
+  return devicePlatform(device) === 'android';
+}
+
+function androidVersionText(sdk: number | string) {
+  const apiLevel = Number(sdk);
+  const release = androidReleaseByApi[apiLevel];
+  if (release) return `Android ${release}`;
+  return Number.isFinite(apiLevel) && apiLevel > 0 ? `Android SDK ${Math.round(apiLevel)}` : null;
+}
+
+const androidReleaseByApi: Record<number, string> = {
+  21: '5.0',
+  22: '5.1',
+  23: '6.0',
+  24: '7.0',
+  25: '7.1',
+  26: '8.0',
+  27: '8.1',
+  28: '9',
+  29: '10',
+  30: '11',
+  31: '12',
+  32: '12L',
+  33: '13',
+  34: '14',
+  35: '15',
+  36: '16',
+};
+
+function screenSizeText(device: MiraDevice) {
+  const outlineScreen = device.outline?.screen;
+  const info = device.screenInfo;
+  const width = positiveNumber(info?.sourceWidth) ?? positiveNumber(outlineScreen?.width) ?? positiveNumber(device.outline?.width);
+  const height = positiveNumber(info?.sourceHeight) ?? positiveNumber(outlineScreen?.height) ?? positiveNumber(device.outline?.height);
+  return width && height ? `${width}x${height}` : null;
+}
+
+function screenStateText(device: MiraDevice) {
+  if (device.screenSource || device.screenInfo || device.screenLastSeen || device.outline) return 'on,unlocked';
+  return null;
+}
+
+function currentSurfaceRows(device: MiraDevice, platform: DevicePlatform): Array<[string, string]> {
+  if (platform === 'ios') {
+    const rows: Array<[string, string]> = [];
+    addKnownRow(rows, 'Application', device.packageName || device.outline?.packageName);
+    addKnownRow(rows, 'View', iosViewText(device));
+    return rows;
+  }
+
+  const rows: Array<[string, string]> = [];
+  addKnownRow(rows, 'Application', device.outline?.packageName || device.packageName);
+  addKnownRow(rows, 'Activity', device.outline?.activityName);
+  return rows;
+}
+
+function iosViewText(device: MiraDevice) {
+  if (device.screenSource === 'app-key-window') return 'App key window';
+  return device.screenSource || 'App view';
+}
+
+function positiveNumber(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? Math.round(numberValue) : null;
 }
 
 type MetricPoint = {

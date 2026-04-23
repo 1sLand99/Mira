@@ -4,23 +4,9 @@ import clsx from 'clsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, CompositionEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { screenVideoWsUrl, sendScreenInput } from '@/lib/relay';
-import type { MiraDevice, ScreenInputKind, ScreenInputResponse } from '@/lib/types';
+import type { MiraDevice, ScreenInputKind, ScreenInputResponse, ScreenVideoInfo } from '@/lib/types';
 
 type LiveStatus = 'connecting' | 'waiting' | 'live' | 'error' | 'unsupported';
-
-type ScreenVideoInfo = {
-  type?: string;
-  installId?: string;
-  codec?: string;
-  format?: string;
-  width?: number;
-  height?: number;
-  sourceWidth?: number;
-  sourceHeight?: number;
-  fps?: number;
-  bitrate?: number;
-  error?: string;
-};
 
 type VideoPacket = {
   keyFrame: boolean;

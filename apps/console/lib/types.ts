@@ -59,14 +59,38 @@ export type Outline = {
   capturedAt?: string | number;
 };
 
+export type ScreenVideoInfo = {
+  type?: 'screen.video.info' | string;
+  protocol?: number;
+  installId?: string;
+  deviceName?: string;
+  codec?: string;
+  mime?: string;
+  format?: string;
+  width?: number;
+  height?: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  fps?: number;
+  bitrate?: number;
+  maxWidth?: number;
+  transport?: string;
+  receivedAt?: number;
+};
+
 export type MiraDevice = {
   type?: string;
   protocol?: number;
   installId: string;
   deviceName?: string;
   packageName?: string;
+  platform?: string;
+  osName?: string;
+  osVersion?: string;
+  screenSource?: string;
   androidIdHash?: string;
   model?: string;
+  hardwareModel?: string;
   sdk?: number;
   arch?: string;
   state?: DeviceState;
@@ -75,6 +99,8 @@ export type MiraDevice = {
   wakeUrl?: string;
   outline?: Outline | null;
   outlineLastSeen?: number;
+  screenInfo?: ScreenVideoInfo | null;
+  screenLastSeen?: number;
   metrics?: DeviceMetrics | null;
   metricsLastSeen?: number;
 };
