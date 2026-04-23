@@ -50,6 +50,8 @@ typedef struct mira_ios_relay_state {
     char home_dir[PATH_MAX];
     char install_id[64];
     char status[256];
+    mira_ios_screen_input_callback_t screen_input_callback;
+    void *screen_input_context;
 } mira_ios_relay_state_t;
 
 typedef struct mira_ios_session_state {
@@ -66,6 +68,8 @@ typedef struct mira_ios_session_state {
     volatile int running;
 } mira_ios_session_state_t;
 
+static int mira_ws_send_text(mira_ws_connection_t *ws, const char *text);
+
 static mira_ios_relay_state_t g_relay = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
     .running = 0,
@@ -76,6 +80,8 @@ static mira_ios_relay_state_t g_relay = {
     .home_dir = {0},
     .install_id = {0},
     .status = "idle",
+    .screen_input_callback = NULL,
+    .screen_input_context = NULL,
 };
 
 static void mira_status_set(const char *format, ...) {
@@ -97,6 +103,50 @@ const char *mira_ios_relay_status(void) {
     snprintf(snapshot, sizeof(snapshot), "%s", g_relay.status);
     pthread_mutex_unlock(&g_relay.mutex);
     return snapshot;
+}
+
+const char *mira_ios_relay_install_id(void) {
+    static char snapshot[64];
+    pthread_mutex_lock(&g_relay.mutex);
+    snprintf(snapshot, sizeof(snapshot), "%s", g_relay.install_id);
+    pthread_mutex_unlock(&g_relay.mutex);
+    return snapshot;
+}
+
+int mira_ios_relay_send_control_json(const char *json) {
+    if (json == NULL || json[0] == '\0') {
+        errno = EINVAL;
+        return -1;
+    }
+    pthread_mutex_lock(&g_relay.mutex);
+    mira_ws_connection_t *control = g_relay.control;
+    if (!g_relay.running || control == NULL) {
+        pthread_mutex_unlock(&g_relay.mutex);
+        errno = ENOTCONN;
+        return -1;
+    }
+    int result = mira_ws_send_text(control, json);
+    pthread_mutex_unlock(&g_relay.mutex);
+    return result;
+}
+
+void mira_ios_relay_set_screen_input_callback(mira_ios_screen_input_callback_t callback, void *context) {
+    pthread_mutex_lock(&g_relay.mutex);
+    g_relay.screen_input_callback = callback;
+    g_relay.screen_input_context = context;
+    pthread_mutex_unlock(&g_relay.mutex);
+}
+
+static void mira_dispatch_screen_input(const char *json) {
+    mira_ios_screen_input_callback_t callback = NULL;
+    void *context = NULL;
+    pthread_mutex_lock(&g_relay.mutex);
+    callback = g_relay.screen_input_callback;
+    context = g_relay.screen_input_context;
+    pthread_mutex_unlock(&g_relay.mutex);
+    if (callback != NULL) {
+        callback(json == NULL ? "" : json, context);
+    }
 }
 
 static int mira_is_running(void) {
@@ -774,10 +824,6 @@ static void *mira_control_thread(void *arg) {
             sleep(MIRA_IOS_RELAY_RETRY_SECONDS);
             continue;
         }
-        pthread_mutex_lock(&g_relay.mutex);
-        g_relay.control = ws;
-        pthread_mutex_unlock(&g_relay.mutex);
-
         char escaped_device[256], escaped_relay[1200];
         mira_json_escape(device_name, escaped_device, sizeof(escaped_device));
         mira_json_escape(relay_url, escaped_relay, sizeof(escaped_relay));
@@ -793,6 +839,9 @@ static void *mira_control_thread(void *arg) {
             sleep(MIRA_IOS_RELAY_RETRY_SECONDS);
             continue;
         }
+        pthread_mutex_lock(&g_relay.mutex);
+        g_relay.control = ws;
+        pthread_mutex_unlock(&g_relay.mutex);
         mira_status_set("control connected");
 
         while (mira_is_running()) {
@@ -816,6 +865,8 @@ static void *mira_control_thread(void *arg) {
                     mira_start_session_from_json((const char *) frame.payload);
                 } else if (strcmp(type, "session.close") == 0) {
                     mira_status_set("session close requested");
+                } else if (strcmp(type, "screen.input") == 0) {
+                    mira_dispatch_screen_input((const char *) frame.payload);
                 }
             }
             mira_ws_frame_free(&frame);

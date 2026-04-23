@@ -1,25 +1,25 @@
 # iOS App(苹果移动应用)
 
-本文记录 Mira iOS App 的当前状态和启动方式。本阶段目标只做 App shell(应用壳) 和首页 UI(用户界面), 参考 Android(安卓系统) 首页, 不在本阶段接 fork(派生进程) 和 PTY(伪终端) 进程链路。
+本文记录 Mira iOS App 的当前状态和启动方式。当前 iOS 侧已经接入 Relay(中继服务), PTY(伪终端), 远程 View(界面视图) 上传, 设备指标采样和浏览器快捷输入。
 
-## 当前范围
+## 当前能力
 
 已完成:
 
 1. `ios/Mira/Mira.xcodeproj` Xcode project(Xcode 项目)。
-2. SwiftUI(Swift 声明式界面框架) 首页。
-3. Relay URL(中继地址) 输入框。
-4. `Connect Relay` 和 `Disconnect` 按钮。
-5. `Status` 状态文本。
-6. `NativeBridge` 目录占位, 给下一阶段 C bridge(C 语言桥接层) 接入使用。
-7. 根目录 `./mira-ios` 启动入口。
+2. SwiftUI(Swift 声明式界面框架) 首页, 对齐 Android(安卓系统) 控制页。
+3. Relay URL(中继地址) 输入框, `Connect Relay` 和 `Disconnect` 按钮。
+4. iOS 原生 relay 控制通道, 支持浏览器打开 PTY(伪终端) 会话。
+5. App 自身窗口 View(界面视图) 通过 H.264(视频编码标准) + WebSocket(网页套接字) 上传到 `/ws/screen/device`。
+6. CPU(中央处理器), 内存和网络速率指标每 1 秒通过 `device.metrics` 上报。
+7. 浏览器远程画面支持点击, 文本输入, 粘贴, 复制, 全选, 清空, Backspace(退格) 和 Delete(删除)。
+8. 根目录 `./mira-ios` 启动入口。
 
-暂不做:
+当前边界:
 
-1. 不连接 Relay Server(中继服务端)。
-2. 不启动 PTY。
-3. 不接 fork/exec(派生进程和替换进程镜像) 原生链路。
-4. 不接 WebView(网页视图) 或 Web Terminal(网页终端)。
+1. 只渲染 Mira App 自己的 key window(主窗口), 不使用 ReplayKit(苹果屏幕录制框架), 不采集系统全屏。
+2. 远程点击使用公开 UIKit(苹果界面框架) 能力尽量激活命中的控件, 不做私有系统触摸注入。
+3. 原生 C relay 的控制通道仍以 `ws://` 为主, Swift 层远程画面 WebSocket 支持 `ws://` 和 `wss://` URL(统一资源定位符)。
 
 ## 目录
 
@@ -33,9 +33,19 @@ ios/
         ContentView.swift
         MiraControlViewModel.swift
       NativeBridge/
+        Mira-Bridging-Header.h
         MiraNativeStatus.swift
+        MiraRemoteServices.swift
       Resources/
         README.md
+```
+
+Native bridge(原生桥接层) 还会引用:
+
+```text
+native/bridge/ios/mira_pty_ios_shim.h
+native/bridge/ios/mira_pty_ios_shim.c
+native/bridge/ios/mira_ios_relay.c
 ```
 
 ## 打开方式
@@ -74,9 +84,18 @@ MIRA_IOS_SCHEME="Mira" ./mira-ios
 MIRA_IOS_BUNDLE_ID="com.vwww.mira.ios" ./mira-ios
 ```
 
+## Relay 联调路径
+
+1. 启动 Mira relay 服务端。
+2. 在 iOS App 输入 Relay URL(中继地址) 并点击 `Connect Relay`。
+3. 浏览器打开 relay console(控制台), 设备列表应出现 iOS 设备。
+4. 选择设备后, 左侧显示 iOS App 自身画面, 右侧 Web Terminal(网页终端) 可打开 PTY 会话。
+5. 底部 INFO(信息) 面板展示 CPU, MEM(内存), NET(网络) 动态曲线。
+6. 在远程画面中点击输入框后, 可通过浏览器键盘输入文字, 粘贴, 复制, 全选和删除。
+
 ## 首页 UI 对齐 Android
 
-Android 首页当前是极简控制页:
+Android 和 iOS 首页保持相同信息架构:
 
 1. 左侧大标题 `Mira`。
 2. 右侧小字 `by vw2x`。
@@ -84,28 +103,3 @@ Android 首页当前是极简控制页:
 4. `Connect Relay` 按钮。
 5. `Disconnect` 按钮。
 6. monospaced(等宽字体) 状态文本。
-
-iOS 当前保持同样的信息架构, 但使用 SwiftUI 原生控件。
-
-## 下一阶段接入点
-
-下一阶段做 fork/exec 和 PTY 时, 建议从这里开始:
-
-```text
-ios/Mira/Mira/NativeBridge/
-```
-
-目标文件建议为:
-
-```text
-ios/Mira/Mira/NativeBridge/MiraPtySession.swift
-ios/Mira/Mira/NativeBridge/MiraPtyProcess.swift
-ios/Mira/Mira/NativeBridge/MiraPtyLaunchSpec.swift
-```
-
-Swift 层通过以下 C shim(C 语言薄适配层) 接入 native core(原生核心层):
-
-```text
-native/bridge/ios/mira_pty_ios_shim.h
-native/bridge/ios/mira_pty_ios_shim.c
-```

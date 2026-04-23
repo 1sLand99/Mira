@@ -1,5 +1,7 @@
 import Foundation
+import SwiftUI
 
+@MainActor
 final class MiraControlViewModel: ObservableObject {
     private enum DefaultsKey {
         static let relayURL = "relay_url"
@@ -13,14 +15,11 @@ final class MiraControlViewModel: ObservableObject {
 
     @Published private(set) var statusText: String = "disconnected"
     private var statusTimer: Timer?
+    private var relayConnected = false
 
     init() {
         relayURL = UserDefaults.standard.string(forKey: DefaultsKey.relayURL) ?? ""
         refreshNativeStatus()
-    }
-
-    deinit {
-        statusTimer?.invalidate()
     }
 
     func connectRelay() {
@@ -31,6 +30,8 @@ final class MiraControlViewModel: ObservableObject {
         }
         relayURL = normalized
         if MiraNativeStatus.startRelay(url: normalized) {
+            relayConnected = true
+            MiraRemoteServices.shared.start(relayURL: normalized)
             statusText = MiraNativeStatus.current.ptyLifecycle
             startStatusPolling()
         } else {
@@ -41,14 +42,31 @@ final class MiraControlViewModel: ObservableObject {
     func disconnectRelay() {
         statusTimer?.invalidate()
         statusTimer = nil
+        relayConnected = false
+        MiraRemoteServices.shared.stop()
         MiraNativeStatus.stopRelay()
         refreshNativeStatus()
+    }
+
+    func handleScenePhase(_ scenePhase: ScenePhase) {
+        switch scenePhase {
+        case .active:
+            if relayConnected {
+                MiraRemoteServices.shared.resumeForSceneActive()
+            }
+        case .inactive, .background:
+            MiraRemoteServices.shared.pauseForSceneStop()
+        @unknown default:
+            break
+        }
     }
 
     private func startStatusPolling() {
         statusTimer?.invalidate()
         statusTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.refreshNativeStatus()
+            Task { @MainActor in
+                self?.refreshNativeStatus()
+            }
         }
         RunLoop.main.add(statusTimer!, forMode: .common)
     }

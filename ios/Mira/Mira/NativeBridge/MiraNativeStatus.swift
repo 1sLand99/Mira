@@ -11,7 +11,12 @@ struct MiraNativeStatus {
         return MiraNativeStatus(backendName: backend, ptyLifecycle: relay)
     }
 
+    static var installId: String {
+        String(cString: mira_ios_relay_install_id())
+    }
+
     @discardableResult
+    @MainActor
     static func startRelay(url: String) -> Bool {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
@@ -28,5 +33,12 @@ struct MiraNativeStatus {
 
     static func stopRelay() {
         mira_ios_relay_stop()
+    }
+
+    @discardableResult
+    static func sendControlJSON(_ json: String) -> Bool {
+        json.withCString { pointer in
+            mira_ios_relay_send_control_json(pointer) == 0
+        }
     }
 }
