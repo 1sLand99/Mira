@@ -62,13 +62,16 @@ public final class MiraPtyLaunchSpec {
         String home = homeDir.getAbsolutePath();
         String basePath = prefix + "/bin:/system/bin:/system/xbin";
         String toolboxPath = toolbox == null ? "" : toolbox.pathPrefix();
+        String fridaNativePath = toolbox == null ? "" : toolbox.binDirPath() + "/frida-native";
         String path = toolbox == null ? basePath : toolboxPath + ":" + basePath;
         String commandSocket = MiraLocalCommandServer.socketFile(context).getAbsolutePath();
 
         String[] args = new String[0];
         String[] env = new String[] {
             "PREFIX=" + prefix,
+            "TERMUX_PREFIX=" + prefix,
             "HOME=" + home,
+            "TERMUX_HOME=" + home,
             "TMPDIR=" + tmpDir.getAbsolutePath(),
             "PATH=" + path,
             "TERM=xterm-256color",
@@ -77,6 +80,7 @@ public final class MiraPtyLaunchSpec {
             "MIRA_PREFIX=" + prefix,
             "MIRA_PATH_PREFIX=" + toolboxPath,
             "MIRA_TOOLBOX_BIN=" + toolboxPath,
+            "MIRA_FRIDA_NATIVE=" + fridaNativePath,
             "MIRA_BUSYBOX=" + (toolbox == null ? "" : toolbox.busyboxPath()),
             "MIRA_BUSYBOX_ABI=" + (toolbox == null ? "" : toolbox.busyboxAbi()),
             "MIRA_BUSYBOX_ASSET=" + (toolbox == null ? "" : toolbox.busyboxAssetPath()),

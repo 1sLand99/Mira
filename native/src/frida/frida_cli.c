@@ -1,5 +1,6 @@
 #include "frida-core.h"
 
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,8 +27,11 @@ typedef struct {
   guint pid;
   guint timeout_ms;
   guint timeout_source_id;
-  guint stdin_source_id;
-  GIOChannel * stdin_channel;
+  guint input_source_id;
+  GIOChannel * input_channel;
+  gint input_fd;
+  gboolean owns_input_fd;
+  gboolean input_is_tty;
   gboolean awaiting_reply;
   guint next_request_id;
   guint pending_request_id;
@@ -41,13 +45,24 @@ static const gchar * kDefaultAddress = "127.0.0.1:27042";
 static const guint kDefaultTimeoutMs = 3000;
 static const gchar * kBatchPrelude =
     "(function () {\n"
+    "  function miraDefer(fn) {\n"
+    "    if (typeof setImmediate === 'function') {\n"
+    "      setImmediate(fn);\n"
+    "      return;\n"
+    "    }\n"
+    "    if (typeof setTimeout === 'function') {\n"
+    "      setTimeout(fn, 0);\n"
+    "      return;\n"
+    "    }\n"
+    "    fn();\n"
+    "  }\n"
     "  if (typeof globalThis.Mira === 'undefined') {\n"
     "    globalThis.Mira = {\n"
     "      result: function (value) { send(value); },\n"
-    "      done: function (code) { send({ $fridaCli: { event: 'done', code: code === undefined ? 0 : code } }); },\n"
-    "      exit: function (code) { send({ $fridaCli: { event: 'done', code: code === undefined ? 0 : code } }); },\n"
-    "      error: function (message) { send({ $fridaCli: { event: 'done', code: 1, error: String(message) } }); },\n"
-    "      fail: function (message) { send({ $fridaCli: { event: 'done', code: 1, error: String(message) } }); },\n"
+    "      done: function (code) { miraDefer(function () { send({ $fridaCli: { event: 'done', code: code === undefined ? 0 : code } }); }); },\n"
+    "      exit: function (code) { miraDefer(function () { send({ $fridaCli: { event: 'done', code: code === undefined ? 0 : code } }); }); },\n"
+    "      error: function (message) { miraDefer(function () { send({ $fridaCli: { event: 'done', code: 1, error: String(message) } }); }); },\n"
+    "      fail: function (message) { miraDefer(function () { send({ $fridaCli: { event: 'done', code: 1, error: String(message) } }); }); },\n"
     "      status: function (payload) { send({ $fridaCli: { event: 'status', data: payload } }); }\n"
     "    };\n"
     "  }\n"
@@ -150,6 +165,7 @@ static gboolean parse_timeout_option(int argc, char ** argv, int * index, guint 
 static gboolean parse_load_option(int argc, char ** argv, int * index, const char ** path);
 static gchar * join_arguments(int argc, char ** argv, int start_index);
 static gchar * wrap_batch_source(const gchar * source);
+static gchar * wrap_repl_source(const gchar * source);
 static gchar * load_script_source(const gchar * path, GError ** error);
 static FridaDevice * open_remote_device(const char * address, FridaDeviceManager ** manager_out, GError ** error);
 static FridaProcessList * enumerate_processes(FridaDevice * device, GError ** error);
@@ -159,10 +175,12 @@ static gboolean load_script(MiraFridaRunContext * context, const gchar * name, c
 static int command_status(const char * address, guint timeout_ms);
 static int command_batch(const char * address, const gchar * source, guint timeout_ms, const gchar * script_name);
 static int command_repl(const char * address);
+static int command_repl_with_source(const char * address, const gchar * source, const gchar * script_name, gboolean reopen_tty);
 static int command_version_compat(const char * address, guint timeout_ms);
 static gboolean start_context_loop(MiraFridaRunContext * context, guint timeout_ms);
 static void cleanup_context(MiraFridaRunContext * context);
-static void print_repl_prompt(void);
+static gboolean setup_repl_input(MiraFridaRunContext * context, gboolean reopen_tty);
+static void print_repl_prompt(MiraFridaRunContext * context);
 static gboolean post_repl_request(MiraFridaRunContext * context, const gchar * line);
 static gboolean on_repl_input(GIOChannel * channel, GIOCondition condition, gpointer user_data);
 static void on_session_detached(FridaSession * session, FridaSessionDetachReason reason, FridaCrash * crash, gpointer user_data);
@@ -187,6 +205,7 @@ main(int argc, char * argv[])
   gboolean show_status = FALSE;
   gboolean show_version_compat = FALSE;
   gboolean eval_compat = FALSE;
+  gboolean force_batch = FALSE;
   gchar * inline_source = NULL;
   int i;
   int exit_code;
@@ -201,7 +220,7 @@ main(int argc, char * argv[])
       g_printerr("frida: failed to read script from stdin\n");
       return 2;
     }
-    exit_code = command_batch(address, inline_source, timeout_ms, "stdin");
+    exit_code = command_repl_with_source(address, inline_source, "stdin", TRUE);
     g_free(inline_source);
     return exit_code;
   }
@@ -213,6 +232,10 @@ main(int argc, char * argv[])
     }
     if (strcmp(argv[i], "--status") == 0) {
       show_status = TRUE;
+      continue;
+    }
+    if (strcmp(argv[i], "--batch") == 0) {
+      force_batch = TRUE;
       continue;
     }
     if (parse_common_option(argc, argv, &i, &address))
@@ -272,7 +295,10 @@ main(int argc, char * argv[])
         g_error_free(error);
       return 2;
     }
-    exit_code = command_batch(address, source, timeout_ms, load_path);
+    if (force_batch)
+      exit_code = command_batch(address, source, timeout_ms, load_path);
+    else
+      exit_code = command_repl_with_source(address, source, load_path, !isatty(STDIN_FILENO));
     g_free(source);
     return exit_code;
   }
@@ -286,9 +312,16 @@ main(int argc, char * argv[])
         g_error_free(error);
       return 2;
     }
-    exit_code = command_batch(address, source, timeout_ms, "stdin");
+    exit_code = force_batch
+        ? command_batch(address, source, timeout_ms, "stdin")
+        : command_repl_with_source(address, source, "stdin", TRUE);
     g_free(source);
     return exit_code;
+  }
+
+  if (force_batch) {
+    g_printerr("frida: --batch requires -l FILE or stdin script input\n");
+    return 2;
   }
 
   return command_repl(address);
@@ -297,15 +330,26 @@ main(int argc, char * argv[])
 static void
 print_usage(const char * program_name)
 {
+  gchar * basename = g_path_get_basename(program_name);
+  const char * display_name = g_str_has_prefix(basename, "frida-native") ? "frida" : basename;
   g_print(
       "Usage:\n"
       "  %s --help\n"
       "  %s [--address HOST:PORT] [--timeout MS] --status\n"
-      "  %s [--address HOST:PORT] [--timeout MS] -l FILE\n"
-      "  %s [--address HOST:PORT] [--timeout MS] -l -\n"
+      "  %s [--address HOST:PORT] [--timeout MS] [-l FILE]\n"
+      "  cat script.js | %s [--address HOST:PORT] [--timeout MS]\n"
+      "  %s [--address HOST:PORT] [--timeout MS] [--batch] -l FILE\n"
       "  %s [--address HOST:PORT]\n"
       "\n"
-      "Batch script helpers:\n"
+      "Interactive mode:\n"
+      "  frida -l script.js   load script.js, keep it attached, then enter REPL\n"
+      "  cat script.js | frida   load stdin script, then keep session attached\n"
+      "\n"
+      "Batch mode:\n"
+      "  frida --batch -l script.js\n"
+      "  cat script.js | frida --batch -l -\n"
+      "\n"
+      "Batch helpers:\n"
       "  Mira.done([code])  exit current batch script\n"
       "  Mira.result(value) emit a result line\n"
       "  Mira.error(message) emit an error and exit 1\n"
@@ -313,11 +357,13 @@ print_usage(const char * program_name)
       "REPL helpers:\n"
       "  .help             show REPL help\n"
       "  .exit             exit REPL\n",
-      program_name,
-      program_name,
-      program_name,
-      program_name,
-      program_name);
+      display_name,
+      display_name,
+      display_name,
+      display_name,
+      display_name,
+      display_name);
+  g_free(basename);
 }
 
 static gboolean
@@ -386,6 +432,14 @@ static gchar *
 wrap_batch_source(const gchar * source)
 {
   return g_strconcat(kBatchPrelude, source, "\n", NULL);
+}
+
+static gchar *
+wrap_repl_source(const gchar * source)
+{
+  if (source == NULL || *source == '\0')
+    return g_strdup(kReplBootstrap);
+  return g_strconcat(source, "\n", kReplBootstrap, NULL);
 }
 
 static gchar *
@@ -667,14 +721,25 @@ cleanup:
 static int
 command_repl(const char * address)
 {
+  return command_repl_with_source(address, NULL, NULL, FALSE);
+}
+
+static int
+command_repl_with_source(const char * address,
+                         const gchar * source,
+                         const gchar * script_name,
+                         gboolean reopen_tty)
+{
   MiraFridaRunContext context;
   GError * error = NULL;
+  gchar * wrapped_source = NULL;
   int exit_code;
 
   memset(&context, 0, sizeof(context));
   context.mode = MIRA_FRIDA_MODE_REPL;
   context.exit_code = 0;
   context.next_request_id = 1;
+  context.input_fd = -1;
 
   if (!connect_session(&context, address, &error)) {
     g_printerr("frida: %s\n", error != NULL ? error->message : "failed to connect to Gadget");
@@ -684,20 +749,20 @@ command_repl(const char * address)
     return 3;
   }
 
-  if (!load_script(&context, "mira-frida-repl", kReplBootstrap, &error)) {
+  wrapped_source = wrap_repl_source(source);
+  if (!load_script(&context,
+                   script_name != NULL ? script_name : "mira-frida-repl",
+                   wrapped_source,
+                   &error)) {
     g_printerr("frida: %s\n", error != NULL ? error->message : "failed to start REPL");
     if (error != NULL)
       g_error_free(error);
+    g_free(wrapped_source);
     cleanup_context(&context);
     return 4;
   }
 
-  context.stdin_channel = g_io_channel_unix_new(STDIN_FILENO);
-  g_io_channel_set_close_on_unref(context.stdin_channel, FALSE);
-  context.stdin_source_id = g_io_add_watch(context.stdin_channel,
-                                           G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_NVAL,
-                                           on_repl_input,
-                                           &context);
+  setup_repl_input(&context, reopen_tty);
 
   if (!start_context_loop(&context, 0)) {
     if (context.interrupted) exit_code = 130;
@@ -707,6 +772,7 @@ command_repl(const char * address)
     exit_code = context.exit_code;
   }
 
+  g_free(wrapped_source);
   cleanup_context(&context);
   return exit_code;
 }
@@ -747,10 +813,15 @@ cleanup_context(MiraFridaRunContext * context)
 {
   context->shutting_down = TRUE;
 
-  remove_source_if_present(&context->stdin_source_id);
-  if (context->stdin_channel != NULL) {
-    g_io_channel_unref(context->stdin_channel);
-    context->stdin_channel = NULL;
+  remove_source_if_present(&context->input_source_id);
+  if (context->input_channel != NULL) {
+    g_io_channel_unref(context->input_channel);
+    context->input_channel = NULL;
+  }
+  if (context->owns_input_fd && context->input_fd >= 0) {
+    close(context->input_fd);
+    context->owns_input_fd = FALSE;
+    context->input_fd = -1;
   }
 
   if (context->mode == MIRA_FRIDA_MODE_REPL) {
@@ -806,12 +877,39 @@ cleanup_context(MiraFridaRunContext * context)
 }
 
 static void
-print_repl_prompt(void)
+print_repl_prompt(MiraFridaRunContext * context)
 {
-  if (isatty(STDIN_FILENO)) {
+  if (context != NULL && context->input_is_tty) {
     g_print("frida> ");
     fflush(stdout);
   }
+}
+
+static gboolean
+setup_repl_input(MiraFridaRunContext * context, gboolean reopen_tty)
+{
+  gint input_fd = STDIN_FILENO;
+  gboolean owns_input_fd = FALSE;
+
+  if (reopen_tty && !isatty(STDIN_FILENO)) {
+    input_fd = open("/dev/tty", O_RDONLY);
+    owns_input_fd = input_fd >= 0;
+  }
+
+  context->input_fd = input_fd;
+  context->owns_input_fd = owns_input_fd;
+  context->input_is_tty = input_fd >= 0 && isatty(input_fd);
+
+  if (input_fd < 0)
+    return FALSE;
+
+  context->input_channel = g_io_channel_unix_new(input_fd);
+  g_io_channel_set_close_on_unref(context->input_channel, FALSE);
+  context->input_source_id = g_io_add_watch(context->input_channel,
+                                            G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_NVAL,
+                                            on_repl_input,
+                                            context);
+  return TRUE;
 }
 
 static gboolean
@@ -864,7 +962,7 @@ on_repl_input(GIOChannel * channel, GIOCondition condition, gpointer user_data)
 
   if ((condition & (G_IO_HUP | G_IO_ERR | G_IO_NVAL)) != 0) {
     context->interrupted = TRUE;
-    context->stdin_source_id = 0;
+    context->input_source_id = 0;
     g_idle_add(stop_loop, context);
     return G_SOURCE_REMOVE;
   }
@@ -877,14 +975,14 @@ on_repl_input(GIOChannel * channel, GIOCondition condition, gpointer user_data)
     if (error != NULL)
       g_error_free(error);
     g_free(line);
-    context->stdin_source_id = 0;
+    context->input_source_id = 0;
     g_idle_add(stop_loop, context);
     return G_SOURCE_REMOVE;
   }
 
   if (status == G_IO_STATUS_EOF) {
     g_free(line);
-    context->stdin_source_id = 0;
+    context->input_source_id = 0;
     g_idle_add(stop_loop, context);
     return G_SOURCE_REMOVE;
   }
@@ -897,28 +995,28 @@ on_repl_input(GIOChannel * channel, GIOCondition condition, gpointer user_data)
   g_strchomp(line);
   if (*line == '\0') {
     if (!context->awaiting_reply)
-      print_repl_prompt();
+      print_repl_prompt(context);
     g_free(line);
     return G_SOURCE_CONTINUE;
   }
 
   if (strcmp(line, ".exit") == 0 || strcmp(line, "exit") == 0) {
     g_free(line);
-    context->stdin_source_id = 0;
+    context->input_source_id = 0;
     g_idle_add(stop_loop, context);
     return G_SOURCE_REMOVE;
   }
 
   if (strcmp(line, ".help") == 0 || strcmp(line, "help") == 0) {
     g_print("REPL commands:\n  .help\n  .exit\n\nTip:\n  Type JavaScript directly. Example: Java.use('android.app.Activity')\n");
-    print_repl_prompt();
+    print_repl_prompt(context);
     g_free(line);
     return G_SOURCE_CONTINUE;
   }
 
   if (context->awaiting_reply) {
     g_printerr("frida: previous evaluation is still running\n");
-    print_repl_prompt();
+    print_repl_prompt(context);
     g_free(line);
     return G_SOURCE_CONTINUE;
   }
@@ -979,7 +1077,7 @@ on_script_message(FridaScript * script,
     if (!handle_control_message(context, payload)) {
       print_payload_stdout(payload);
       if (context->mode == MIRA_FRIDA_MODE_REPL && !context->awaiting_reply)
-        print_repl_prompt();
+        print_repl_prompt(context);
     }
   } else if (strcmp(type, "error") == 0) {
     context->had_error = TRUE;
@@ -1057,7 +1155,9 @@ handle_control_message(MiraFridaRunContext * context, JsonNode * payload)
             arch != NULL ? arch : "unknown",
             platform != NULL ? platform : "unknown",
             java_available ? "true" : "false");
-    print_repl_prompt();
+    if (!context->input_is_tty)
+      g_print("script loaded. REPL input unavailable, press Ctrl-C to exit.\n");
+    print_repl_prompt(context);
     return TRUE;
   }
 
@@ -1068,7 +1168,7 @@ handle_control_message(MiraFridaRunContext * context, JsonNode * payload)
       g_print("%s\n", text != NULL ? text : "undefined");
       context->awaiting_reply = FALSE;
       context->pending_request_id = 0;
-      print_repl_prompt();
+      print_repl_prompt(context);
     }
     return TRUE;
   }
@@ -1080,7 +1180,7 @@ handle_control_message(MiraFridaRunContext * context, JsonNode * payload)
       g_printerr("%s\n", message != NULL ? message : "unknown error");
       context->awaiting_reply = FALSE;
       context->pending_request_id = 0;
-      print_repl_prompt();
+      print_repl_prompt(context);
     } else if (message != NULL) {
       g_printerr("%s\n", message);
     }

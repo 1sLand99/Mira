@@ -1,11 +1,17 @@
 package com.vwww.mira;
 
 import android.content.Context;
+import android.content.res.AssetManager;
+import android.os.Build;
+import android.util.Log;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 /**
  * Mira 最小 bootstrap, 用于创建 APK 私有沙盒里的类 Termux 用户空间骨架。
@@ -13,33 +19,44 @@ import java.nio.charset.StandardCharsets;
  * 当前只提供 files/usr/bin/sh wrapper, 不安装 apt 或完整 Termux 包。
  */
 public final class MiraBootstrap {
+    private static final String TAG = "MiraBootstrap";
+    private static final String MANAGED_MARKER = "# Managed by MiraBootstrap";
+    private static final String BOOTSTRAP_PREFIX_ASSET_ROOT = "bootstrap/prefix";
+
     private final File filesDir;
     private final File prefixDir;
     private final File homeDir;
     private final File tmpDir;
+    private final AssetManager assets;
 
     public MiraBootstrap(Context context) {
-        filesDir = context.getFilesDir();
+        Context appContext = context.getApplicationContext();
+        assets = appContext.getAssets();
+        filesDir = appContext.getFilesDir();
         prefixDir = new File(filesDir, "usr");
         homeDir = new File(filesDir, "home");
-        tmpDir = new File(context.getCacheDir(), "tmp");
+        tmpDir = new File(appContext.getCacheDir(), "tmp");
     }
 
     public void installIfNeeded() throws IOException {
         mkdir(prefixDir);
         mkdir(homeDir);
         mkdir(tmpDir);
+        installBootstrapPrefixIfAvailable();
         mkdir(new File(prefixDir, "bin"));
         mkdir(new File(prefixDir, "etc"));
+        mkdir(new File(prefixDir, "etc/profile.d"));
         mkdir(new File(prefixDir, "tmp"));
         mkdir(new File(prefixDir, "var"));
         mkdir(new File(prefixDir, "share"));
 
-        writeExecutable(new File(prefixDir, "bin/sh"), shellWrapper());
-        writeExecutable(new File(prefixDir, "bin/mira-info"), miraInfoScript());
+        writeManagedExecutable(new File(prefixDir, "bin/sh"), shellWrapper(), "export MIRA_SANDBOX=1", "export ENV=\"$HOME/.profile\"");
+        writeManagedExecutable(new File(prefixDir, "bin/mira-info"), miraInfoScript(), "echo \"Mira sandbox\"");
+        writeManagedExecutable(new File(prefixDir, "bin/frida"), fridaWrapperScript());
         writeMiraCommandWrappers();
-        writeText(new File(prefixDir, "etc/profile"), profileScript());
-        writeText(new File(homeDir, ".profile"), homeProfileScript());
+        writeManagedText(new File(prefixDir, "etc/profile.d/mira-env.sh"), profileHookScript());
+        writeManagedText(new File(prefixDir, "etc/profile"), profileScript(), "# Mira minimal profile");
+        writeManagedText(new File(homeDir, ".profile"), homeProfileScript(), "# Mira shell profile");
     }
 
     public File getPrefixDir() {
@@ -72,6 +89,16 @@ public final class MiraBootstrap {
         if (!file.setExecutable(true, true)) throw new IOException("无法设置可执行权限: " + file.getAbsolutePath());
     }
 
+    private void writeManagedExecutable(File file, String content, String... legacyMarkers) throws IOException {
+        if (!shouldWriteManagedFile(file, legacyMarkers)) return;
+        writeExecutable(file, content);
+    }
+
+    private void writeManagedText(File file, String content, String... legacyMarkers) throws IOException {
+        if (!shouldWriteManagedFile(file, legacyMarkers)) return;
+        writeText(file, content);
+    }
+
     private void writeText(File file, String content) throws IOException {
         File parent = file.getParentFile();
         if (parent != null) mkdir(parent);
@@ -80,13 +107,42 @@ public final class MiraBootstrap {
         }
     }
 
+    private boolean shouldWriteManagedFile(File file, String... legacyMarkers) throws IOException {
+        if (!file.exists()) return true;
+        String existing = readText(file);
+        if (existing.contains(MANAGED_MARKER)) return true;
+        if (legacyMarkers != null) {
+            for (String marker : legacyMarkers) {
+                if (marker != null && !marker.isEmpty() && existing.contains(marker)) return true;
+            }
+        }
+        Log.i(TAG, "Preserve existing non-managed file " + file.getAbsolutePath());
+        return false;
+    }
+
+    private String readText(File file) throws IOException {
+        byte[] buffer = new byte[(int) file.length()];
+        try (FileInputStream input = new FileInputStream(file)) {
+            int offset = 0;
+            while (offset < buffer.length) {
+                int read = input.read(buffer, offset, buffer.length - offset);
+                if (read < 0) break;
+                offset += read;
+            }
+            return new String(buffer, 0, offset, StandardCharsets.UTF_8);
+        }
+    }
+
     private String shellWrapper() {
         String prefix = quote(prefixDir.getAbsolutePath());
         String home = quote(homeDir.getAbsolutePath());
         String tmp = quote(tmpDir.getAbsolutePath());
         return "#!/system/bin/sh\n" +
+            MANAGED_MARKER + "\n" +
             "export PREFIX=" + prefix + "\n" +
+            "export TERMUX_PREFIX=\"$PREFIX\"\n" +
             "export HOME=" + home + "\n" +
+            "export TERMUX_HOME=\"$HOME\"\n" +
             "export TMPDIR=" + tmp + "\n" +
             "MIRA_BASE_PATH=\"$PREFIX/bin:/system/bin:/system/xbin\"\n" +
             "if [ -n \"$MIRA_PATH_PREFIX\" ]; then\n" +
@@ -104,18 +160,31 @@ public final class MiraBootstrap {
     }
 
     private String profileScript() {
-        return "# Mira minimal profile\n" +
+        return MANAGED_MARKER + "\n" +
+            "# Mira minimal profile\n" +
+            "if [ -d \"$PREFIX/etc/profile.d\" ]; then\n" +
+            "  for mira_profile in \"$PREFIX\"/etc/profile.d/*.sh; do\n" +
+            "    [ -f \"$mira_profile\" ] && . \"$mira_profile\"\n" +
+            "  done\n" +
+            "fi\n";
+    }
+
+    private String profileHookScript() {
+        return MANAGED_MARKER + "\n" +
             "MIRA_BASE_PATH=\"$PREFIX/bin:/system/bin:/system/xbin\"\n" +
             "if [ -n \"$MIRA_PATH_PREFIX\" ]; then\n" +
             "  export PATH=\"$MIRA_PATH_PREFIX:$MIRA_BASE_PATH\"\n" +
             "else\n" +
             "  export PATH=\"$MIRA_BASE_PATH\"\n" +
             "fi\n" +
+            "export TERMUX_PREFIX=\"$PREFIX\"\n" +
+            "export TERMUX_HOME=\"$HOME\"\n" +
             "export MIRA_SANDBOX=1\n";
     }
 
     private String homeProfileScript() {
-        return "# Mira shell profile\n" +
+        return MANAGED_MARKER + "\n" +
+            "# Mira shell profile\n" +
             "[ -n \"$PREFIX\" ] && [ -f \"$PREFIX/etc/profile\" ] && . \"$PREFIX/etc/profile\"\n" +
             "alias am='mira-am'\n" +
             "export PS1='mira $ '\n";
@@ -123,11 +192,28 @@ public final class MiraBootstrap {
 
     private String miraInfoScript() {
         return "#!/system/bin/sh\n" +
+            MANAGED_MARKER + "\n" +
             "echo \"Mira sandbox\"\n" +
             "echo \"PREFIX=$PREFIX\"\n" +
             "echo \"HOME=$HOME\"\n" +
             "echo \"TMPDIR=$TMPDIR\"\n" +
             "echo \"SHELL=$SHELL\"\n";
+    }
+
+    private String fridaWrapperScript() {
+        return "#!/system/bin/sh\n" +
+            MANAGED_MARKER + "\n" +
+            "if [ -n \"$MIRA_FRIDA_NATIVE\" ] && [ -x \"$MIRA_FRIDA_NATIVE\" ]; then\n" +
+            "  exec \"$MIRA_FRIDA_NATIVE\" \"$@\"\n" +
+            "fi\n" +
+            "if [ -n \"$MIRA_PATH_PREFIX\" ] && [ -x \"$MIRA_PATH_PREFIX/frida-native\" ]; then\n" +
+            "  exec \"$MIRA_PATH_PREFIX/frida-native\" \"$@\"\n" +
+            "fi\n" +
+            "if [ -n \"$MIRA_TOOLBOX_BIN\" ] && [ -x \"$MIRA_TOOLBOX_BIN/frida-native\" ]; then\n" +
+            "  exec \"$MIRA_TOOLBOX_BIN/frida-native\" \"$@\"\n" +
+            "fi\n" +
+            "echo \"frida: no packaged fallback is available\" >&2\n" +
+            "exit 127\n";
     }
 
     private void writeMiraCommandWrappers() throws IOException {
@@ -194,5 +280,78 @@ public final class MiraBootstrap {
 
     private String quote(String value) {
         return "'" + value.replace("'", "'\\''") + "'";
+    }
+
+    private void installBootstrapPrefixIfAvailable() throws IOException {
+        String assetRoot = selectBootstrapPrefixAssetRoot();
+        if (assetRoot == null) {
+            Log.i(TAG, "No packaged bootstrap prefix for current ABI, keeping minimal prefix");
+            return;
+        }
+        extractAssetTree(assetRoot, prefixDir, "");
+        Log.i(TAG, "Installed bootstrap prefix assets from " + assetRoot);
+    }
+
+    private String selectBootstrapPrefixAssetRoot() throws IOException {
+        String[] abis = Build.SUPPORTED_ABIS == null ? new String[0] : Build.SUPPORTED_ABIS;
+        for (String abi : abis) {
+            String assetRoot = bootstrapPrefixAssetRootForAbi(abi);
+            if (assetRoot != null && assetDirectoryExists(assetRoot)) return assetRoot;
+        }
+        return null;
+    }
+
+    private String bootstrapPrefixAssetRootForAbi(String abi) {
+        if (abi == null) return null;
+        String normalized = abi.toLowerCase(Locale.ROOT);
+        if ("arm64-v8a".equals(normalized)) return BOOTSTRAP_PREFIX_ASSET_ROOT + "/arm64-v8a";
+        if ("armeabi-v7a".equals(normalized) || "armeabi".equals(normalized)) return BOOTSTRAP_PREFIX_ASSET_ROOT + "/armeabi-v7a";
+        if ("x86_64".equals(normalized)) return BOOTSTRAP_PREFIX_ASSET_ROOT + "/x86_64";
+        if ("x86".equals(normalized)) return BOOTSTRAP_PREFIX_ASSET_ROOT + "/x86";
+        return null;
+    }
+
+    private boolean assetDirectoryExists(String assetPath) throws IOException {
+        String[] children = assets.list(assetPath);
+        return children != null && children.length > 0;
+    }
+
+    private void extractAssetTree(String assetRoot, File destinationRoot, String relativePath) throws IOException {
+        String assetPath = relativePath.isEmpty() ? assetRoot : assetRoot + "/" + relativePath;
+        String[] children = assets.list(assetPath);
+        if (children == null || children.length == 0) {
+            File targetFile = relativePath.isEmpty() ? destinationRoot : new File(destinationRoot, relativePath);
+            copyAsset(assetPath, targetFile);
+            if (shouldBeExecutable(relativePath)) {
+                if (!targetFile.setReadable(true, true)) throw new IOException("无法设置可读权限: " + targetFile.getAbsolutePath());
+                if (!targetFile.setWritable(true, true)) throw new IOException("无法设置可写权限: " + targetFile.getAbsolutePath());
+                if (!targetFile.setExecutable(true, true)) throw new IOException("无法设置可执行权限: " + targetFile.getAbsolutePath());
+            }
+            return;
+        }
+        File targetDir = relativePath.isEmpty() ? destinationRoot : new File(destinationRoot, relativePath);
+        mkdir(targetDir);
+        for (String child : children) {
+            String childRelativePath = relativePath.isEmpty() ? child : relativePath + "/" + child;
+            extractAssetTree(assetRoot, destinationRoot, childRelativePath);
+        }
+    }
+
+    private void copyAsset(String assetPath, File destination) throws IOException {
+        File parent = destination.getParentFile();
+        if (parent != null) mkdir(parent);
+        try (InputStream input = assets.open(assetPath); FileOutputStream output = new FileOutputStream(destination, false)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+        }
+    }
+
+    private boolean shouldBeExecutable(String relativePath) {
+        if (relativePath == null || relativePath.isEmpty()) return false;
+        String normalized = relativePath.replace('\\', '/');
+        return normalized.startsWith("bin/") || normalized.startsWith("libexec/") || normalized.startsWith("sbin/");
     }
 }

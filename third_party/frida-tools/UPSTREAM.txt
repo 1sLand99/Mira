@@ -1,0 +1,4 @@
+frida-tools 12.1.0
+source: https://pypi.org/project/frida-tools/12.1.0/
+sdist: https://files.pythonhosted.org/packages/a1/d8/fe151a19e50c8c938b98ebfc03122b9bc34bd324d492550e5f88ae0d9b3b/frida-tools-12.1.0.tar.gz
+notes: vendored for future Android embedded runtime integration with Frida 16.0.7.

@@ -23,6 +23,7 @@ public final class MiraToolbox implements Closeable {
     private static final String TAG = "MiraToolbox";
     private static final String ASSET_ROOT = "toolbox/busybox";
     private static final String FRIDA_ASSET_ROOT = "toolbox/frida";
+    private static final String FRIDA_NATIVE_COMMAND = "frida-native";
     private static final String MANIFEST_ASSET = "toolbox/manifest.json";
 
     private final File sessionDir;
@@ -141,10 +142,10 @@ public final class MiraToolbox implements Closeable {
             Log.i(TAG, "No packaged frida CLI for current ABI, skipping");
             return;
         }
-        File fridaFile = new File(binDir, "frida");
+        File fridaFile = new File(binDir, FRIDA_NATIVE_COMMAND);
         copyAsset(assets, assetPath, fridaFile);
         chmodExecutable(fridaFile);
-        Log.i(TAG, "Installed frida CLI from asset " + assetPath);
+        Log.i(TAG, "Installed native frida fallback from asset " + assetPath + " as " + FRIDA_NATIVE_COMMAND);
     }
 
     private static Set<String> queryBusyBoxApplets(File busyboxFile) throws IOException {
