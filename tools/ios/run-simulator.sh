@@ -145,6 +145,9 @@ launch_device_app() {
   set -e
 
   printf '%s\n' "${output}"
+  if [[ "${output}" == *"error: Cannot launch"* || "${output}" == *"invalid code signature"* ]]; then
+    return 1
+  fi
   if [[ ${status} -ne 0 && "${output}" != *"success"* ]]; then
     return "${status}"
   fi

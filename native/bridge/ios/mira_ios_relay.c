@@ -150,6 +150,7 @@ static void mira_dispatch_screen_input(const char *json) {
     callback = g_relay.screen_input_callback;
     context = g_relay.screen_input_context;
     pthread_mutex_unlock(&g_relay.mutex);
+    fprintf(stderr, "Mira iOS relay: screen input callback=%s payload=%s\n", callback != NULL ? "set" : "nil", json == NULL ? "" : json);
     if (callback != NULL) {
         callback(json == NULL ? "" : json, context);
     }
@@ -742,7 +743,10 @@ static void *mira_session_thread(void *arg) {
                         size_t data_len = 0;
                         unsigned char *data = mira_b64_decode_alloc(b64, &data_len);
                         if (data != NULL) {
-                            if (session->shell != NULL) (void) mira_shell_write(session->shell, data, data_len);
+                            if (session->shell != NULL) {
+                                ssize_t written = mira_shell_write(session->shell, data, data_len);
+                                fprintf(stderr, "Mira iOS relay: terminal.input len=%zu written=%zd\n", data_len, written);
+                            }
                             free(data);
                         }
                     }

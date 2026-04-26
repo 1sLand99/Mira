@@ -35,6 +35,7 @@ MAX_SCREEN_FRAME_BYTES = 2_000_000
 MAX_SCREEN_FRAME_DIMENSION = 8192
 MAX_SCREEN_INPUT_TEXT = 20_000
 SCREEN_STREAM_BOUNDARY = "mira-screen-frame"
+SESSION_ATTACH_GRACE_SECONDS = 5.0
 
 
 @dataclass(eq=False)
@@ -73,6 +74,7 @@ class RelaySession:
     ring: bytearray = field(default_factory=bytearray)
     active: bool = True
     pending_resize: dict[str, Any] | None = None
+    created_at: float = field(default_factory=time.time)
 
     def append_output(self, chunk: bytes) -> None:
         self.ring.extend(chunk)
@@ -614,9 +616,16 @@ async def api_open(state: RelayState, body: dict[str, Any]) -> bytes:
         record = state.devices.get(install_id)
         if not record:
             return json_response("404 Not Found", {"error": "device not found"})
+        now = time.time()
+        stale_session_ids: list[str] = []
         for session in state.sessions.values():
             if session.install_id == install_id and session.active:
+                if session.device_writer is None and now - session.created_at > SESSION_ATTACH_GRACE_SECONDS:
+                    stale_session_ids.append(session.session_id)
+                    continue
                 return json_response("409 Conflict", {"error": "device already has active session", "sessionId": session.session_id})
+        for session_id in stale_session_ids:
+            state.sessions.pop(session_id, None)
         session_id = str(uuid.uuid4())
         state.sessions[session_id] = RelaySession(session_id=session_id, install_id=install_id)
         wake_url = str(record.data.get("wakeUrl") or "")

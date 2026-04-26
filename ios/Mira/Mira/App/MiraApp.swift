@@ -6,7 +6,9 @@ struct MiraApp: App {
     @StateObject private var viewModel = MiraControlViewModel()
 
     init() {
-        MiraFridaLoader.ensureLoaded()
+        NSHomeDirectory().withCString { homePointer in
+            _ = mira_ios_frida_service_start(homePointer)
+        }
     }
 
     var body: some Scene {

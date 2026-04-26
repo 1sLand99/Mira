@@ -55,7 +55,7 @@ cat > "$TARGET_CONFIG" <<'EOF'
   },
   "teardown": "minimal",
   "runtime": "default",
-  "code_signing": "optional"
+  "code_signing": "required"
 }
 EOF
 
