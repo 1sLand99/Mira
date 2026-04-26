@@ -17,14 +17,19 @@ from pathlib import Path
 
 FRIDA_VERSION = "16.0.7"
 FRIDA_TOOLS_VERSION = "12.1.0"
-RUNTIME_VERSION = "official-frida-tools-12.1.0-frida-16.0.7-v5"
+RUNTIME_VERSION = "official-frida-tools-12.1.0-frida-16.0.7-v6"
 ALPINE_VERSION = "v3.19"
 ALPINE_ARCH = "x86"
 ALPINE_REPOS = (
     f"https://dl-cdn.alpinelinux.org/alpine/{ALPINE_VERSION}/main/{ALPINE_ARCH}",
     f"https://dl-cdn.alpinelinux.org/alpine/{ALPINE_VERSION}/community/{ALPINE_ARCH}",
 )
-ROOT_PACKAGES = ("python3", "gcompat")
+ROOT_PACKAGES = (
+    "python3",
+    "python3-dev",
+    "musl-dev",
+    "linux-headers",
+)
 PURE_PYTHON_SPECS = (
     "colorama<1.0.0,>=0.2.7",
     "prompt-toolkit<4.0.0,>=2.0.0",
@@ -35,10 +40,12 @@ PURE_PYTHON_SPECS = (
 SCRIPT_PATH = Path(__file__).resolve()
 ROOT_DIR = SCRIPT_PATH.parents[2]
 FRIDA_TOOLS_DIR = ROOT_DIR / "third_party" / "frida-tools"
-LLVM_CLANG_CANDIDATES = (
-    Path("/opt/homebrew/opt/llvm/bin/clang"),
-    Path("/usr/local/opt/llvm/bin/clang"),
+FRIDA_SDIST_CANDIDATES = (
+    ROOT_DIR / "build" / "termux-prefix" / "sdists" / f"frida-{FRIDA_VERSION}.tar.gz",
 )
+FRIDA_MUSL_DEVKIT_ENV = "MIRA_IOS_FRIDA_DEVKIT_DIR"
+FRIDA_CC_ENV = "MIRA_IOS_FRIDA_CC"
+FRIDA_STRIP_ENV = "MIRA_IOS_FRIDA_STRIP"
 
 
 @dataclass(frozen=True)
@@ -286,17 +293,51 @@ def install_vendored_frida_tools(site_packages: Path) -> None:
     copytree_replace(FRIDA_TOOLS_DIR / "frida_tools.egg-info", site_packages / "frida_tools.egg-info")
 
 
-def install_frida_wheel(site_packages: Path, wheel_cache_dir: Path) -> str:
-    wheel_paths = download_wheels(
-        wheel_cache_dir,
-        (f"frida=={FRIDA_VERSION}",),
-        extra_args=["--platform", "manylinux1_i686", "--implementation", "cp", "--abi", "abi3"],
-    )
-    wheel_path = next((path for path in wheel_paths if path.name.startswith(f"frida-{FRIDA_VERSION}-")), None)
-    if wheel_path is None:
-        raise FileNotFoundError(f"未下载到 frida wheel: {wheel_cache_dir}")
-    install_wheel(wheel_path, site_packages)
-    return wheel_path.name
+def download_source_distribution(destination: Path, spec: str) -> Path:
+    destination.mkdir(parents=True, exist_ok=True)
+    before = {path.resolve() for path in destination.glob("*")}
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "download",
+        "--disable-pip-version-check",
+        "--no-binary=:all:",
+        "--no-deps",
+        "--dest",
+        str(destination),
+        spec,
+    ]
+    run(cmd)
+    after = sorted({path.resolve() for path in destination.glob("*")} - before)
+    if not after:
+        after = sorted(path.resolve() for path in destination.glob("*"))
+    tarballs = [path for path in after if path.suffixes[-2:] == [".tar", ".gz"]]
+    if not tarballs:
+        raise FileNotFoundError(f"未下载到 frida sdist: {destination}")
+    return tarballs[0]
+
+
+def extract_tarball(archive_path: Path, destination: Path) -> Path:
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive_path, "r:gz") as archive:
+        archive.extractall(destination)
+    children = [path for path in destination.iterdir() if path.is_dir()]
+    if len(children) == 1:
+        return children[0]
+    raise RuntimeError(f"无法识别 tarball 根目录: {archive_path}")
+
+
+def ensure_frida_sdist(cache_dir: Path) -> Path:
+    for candidate in FRIDA_SDIST_CANDIDATES:
+        if candidate.is_file():
+            target = cache_dir / candidate.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidate, target)
+            return target
+    return download_source_distribution(cache_dir, f"frida=={FRIDA_VERSION}")
 
 
 def write_executable(path: Path, content: str) -> None:
@@ -306,179 +347,106 @@ def write_executable(path: Path, content: str) -> None:
     path.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def resolve_host_clang() -> Path:
-    for candidate in LLVM_CLANG_CANDIDATES:
-        if candidate.exists():
+def resolve_host_tool(env_name: str, fallback_names: tuple[str, ...]) -> list[str]:
+    override = os.environ.get(env_name, "").strip()
+    if override:
+        return override.split()
+    for name in fallback_names:
+        path = shutil.which(name)
+        if path:
+            return [path]
+    raise FileNotFoundError(f"缺少可用工具: {env_name} 或 {', '.join(fallback_names)}")
+
+
+def ensure_frida_musl_devkit(cache_dir: Path) -> Path:
+    override = os.environ.get(FRIDA_MUSL_DEVKIT_ENV, "").strip()
+    candidates = []
+    if override:
+        candidates.append(Path(override).expanduser().resolve())
+    candidates.extend(
+        (
+            cache_dir / "frida-core-devkit-musl-x86",
+            ROOT_DIR / "build" / "frida" / "devkit" / FRIDA_VERSION / "linux-x86-musl",
+        )
+    )
+    for candidate in candidates:
+        if (candidate / "frida-core.h").is_file() and (candidate / "libfrida-core.a").is_file():
             return candidate
-    clang_path = shutil.which("clang")
-    if clang_path:
-        return Path(clang_path)
-    raise FileNotFoundError("缺少可用的 clang, 无法构建 frida glibc shim")
+    raise FileNotFoundError(
+        "缺少 musl 原生 frida-core devkit. 需要先准备 frida-core.h 和 libfrida-core.a, "
+        f"并通过 {FRIDA_MUSL_DEVKIT_ENV} 指向该目录"
+    )
 
 
-def build_frida_glibc_shim(cache_dir: Path) -> Path:
-    output_path = cache_dir / f"libfrida-glibc-compat-{RUNTIME_VERSION}.so"
+def build_frida_extension(data_root: Path, python_version: str, source_root: Path, output_path: Path, cache_dir: Path) -> tuple[str, str]:
+    devkit_dir = ensure_frida_musl_devkit(cache_dir)
+    cc = resolve_host_tool(FRIDA_CC_ENV, ("i686-linux-musl-gcc",))
+    strip = None
+    try:
+        strip = resolve_host_tool(FRIDA_STRIP_ENV, ("i686-linux-musl-strip",))
+    except FileNotFoundError:
+        strip = None
 
-    source_path = cache_dir / "frida_glibc_compat.c"
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_text(
+    build_root = cache_dir / "frida-extension-build"
+    build_root.mkdir(parents=True, exist_ok=True)
+    version_script = build_root / "_frida.version"
+    version_script.write_text(
         "\n".join(
             [
-                "#include <stdarg.h>",
+                "{",
+                "  global:",
+                "    PyInit__frida;",
                 "",
-                "typedef unsigned int uint32_t;",
-                "typedef unsigned short uint16_t;",
-                "typedef unsigned long size_t;",
-                "typedef long ssize_t;",
-                "",
-                "extern int stat(const char *path, void *buf);",
-                "extern int lstat(const char *path, void *buf);",
-                "extern int fstat(int fd, void *buf);",
-                "extern int fstatat(int dirfd, const char *path, void *buf, int flags);",
-                "extern int statfs(const char *path, void *buf);",
-                "extern int open(const char *path, int flags, ...);",
-                "extern int openat(int dirfd, const char *path, int flags, ...);",
-                "extern void *fopen(const char *path, const char *mode);",
-                "extern long long lseek(int fd, long long offset, int whence);",
-                "extern int ftruncate(int fd, long long length);",
-                "extern void *mmap(void *addr, size_t length, int prot, int flags, int fd, long long offset);",
-                "extern ssize_t pread(int fd, void *buf, size_t count, long long offset);",
-                "extern void *readdir(void *dirp);",
-                "",
-                "typedef union { double d; struct { uint32_t lo; uint32_t hi; } w; } mira_ieee_double;",
-                "typedef union { long double ld; struct { uint32_t lo; uint32_t mid; uint16_t hi; uint16_t pad[3]; } w; } mira_ieee_long_double;",
-                "",
-                "static int mira_h_errno_storage = 0;",
-                "",
-                "int __isnan(double x) {",
-                "    mira_ieee_double u;",
-                "    u.d = x;",
-                "    uint32_t exp = (u.w.hi >> 20) & 0x7ffu;",
-                "    uint32_t frac_hi = u.w.hi & 0xfffffu;",
-                "    return exp == 0x7ffu && ((frac_hi | u.w.lo) != 0);",
-                "}",
-                "",
-                "int __signbit(double x) {",
-                "    mira_ieee_double u;",
-                "    u.d = x;",
-                "    return (int) (u.w.hi >> 31);",
-                "}",
-                "",
-                "int __signbitl(long double x) {",
-                "    mira_ieee_long_double u;",
-                "    u.ld = x;",
-                "    return (int) (u.w.hi >> 15);",
-                "}",
-                "",
-                "int *__h_errno_location(void) {",
-                "    return &mira_h_errno_storage;",
-                "}",
-                "",
-                "int __res_ninit(void *state) {",
-                "    (void) state;",
-                "    return 0;",
-                "}",
-                "",
-                "void __res_nclose(void *state) {",
-                "    (void) state;",
-                "}",
-                "",
-                "int __xstat64(int ver, const char *path, void *buf) {",
-                "    (void) ver;",
-                "    return stat(path, buf);",
-                "}",
-                "",
-                "int __lxstat64(int ver, const char *path, void *buf) {",
-                "    (void) ver;",
-                "    return lstat(path, buf);",
-                "}",
-                "",
-                "int __fxstat64(int ver, int fd, void *buf) {",
-                "    (void) ver;",
-                "    return fstat(fd, buf);",
-                "}",
-                "",
-                "int __fxstatat64(int ver, int dirfd, const char *path, void *buf, int flags) {",
-                "    (void) ver;",
-                "    return fstatat(dirfd, path, buf, flags);",
-                "}",
-                "",
-                "void *fopen64(const char *path, const char *mode) {",
-                "    return fopen(path, mode);",
-                "}",
-                "",
-                "int open64(const char *path, int flags, ...) {",
-                "    va_list args;",
-                "    int mode = 0;",
-                "    va_start(args, flags);",
-                "    mode = va_arg(args, int);",
-                "    va_end(args);",
-                "    return open(path, flags, mode);",
-                "}",
-                "",
-                "int openat64(int dirfd, const char *path, int flags, ...) {",
-                "    va_list args;",
-                "    int mode = 0;",
-                "    va_start(args, flags);",
-                "    mode = va_arg(args, int);",
-                "    va_end(args);",
-                "    return openat(dirfd, path, flags, mode);",
-                "}",
-                "",
-                "long long lseek64(int fd, long long offset, int whence) {",
-                "    return lseek(fd, offset, whence);",
-                "}",
-                "",
-                "int ftruncate64(int fd, long long length) {",
-                "    return ftruncate(fd, length);",
-                "}",
-                "",
-                "void *mmap64(void *addr, size_t length, int prot, int flags, int fd, long long offset) {",
-                "    return mmap(addr, length, prot, flags, fd, offset);",
-                "}",
-                "",
-                "ssize_t pread64(int fd, void *buf, size_t count, long long offset) {",
-                "    return pread(fd, buf, count, offset);",
-                "}",
-                "",
-                "void *readdir64(void *dirp) {",
-                "    return readdir(dirp);",
-                "}",
-                "",
-                "int statfs64(const char *path, unsigned long size, void *buf) {",
-                "    (void) size;",
-                "    return statfs(path, buf);",
-                "}",
+                "  local:",
+                "    *;",
+                "};",
                 "",
             ]
         ),
         encoding="utf-8",
     )
 
-    clang = resolve_host_clang()
-    run(
-        [
-            str(clang),
-            "-target",
-            "i386-linux-musl",
-            "-shared",
-            "-fPIC",
-            "-nostdlib",
-            "-fuse-ld=lld",
-            str(source_path),
-            "-Wl,-soname,libfrida-glibc-compat.so",
-            "-o",
-            str(output_path),
-        ]
-    )
-    return output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    python_lib_name = f"python{python_version}"
+    compile_cmd = [
+        *cc,
+        "-shared",
+        "-fPIC",
+        "-ffunction-sections",
+        "-fdata-sections",
+        f"--sysroot={data_root}",
+        f"-I{devkit_dir}",
+        f"-I{data_root / 'usr' / 'include'}",
+        f"-I{data_root / 'usr' / 'include' / f'python{python_version}'}",
+        str(source_root / "src" / "_frida.c"),
+        "-o",
+        str(output_path),
+        f"-L{devkit_dir}",
+        "-lfrida-core",
+        f"-L{data_root / 'usr' / 'lib'}",
+        f"-l{python_lib_name}",
+        "-ldl",
+        "-lm",
+        "-pthread",
+        "-lresolv",
+        "-lucontext",
+        "-Wl,--gc-sections",
+        f"-Wl,--version-script,{version_script}",
+        "-Wl,-rpath,/usr/lib",
+    ]
+    run(compile_cmd)
+    if strip is not None:
+        run([*strip, str(output_path)])
+    return (source_root.name, str(devkit_dir))
 
 
-def install_frida_glibc_shim(data_root: Path, cache_dir: Path) -> None:
-    shim_path = build_frida_glibc_shim(cache_dir)
-    target_path = data_root / "opt" / "mira" / "frida-python" / "lib" / "libfrida-glibc-compat.so"
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(shim_path, target_path)
+def install_frida_python_binding(data_root: Path, python_version: str, site_packages: Path, cache_dir: Path) -> tuple[str, str]:
+    sdist_path = ensure_frida_sdist(cache_dir)
+    source_root = extract_tarball(sdist_path, cache_dir / "frida-python-src")
+    copytree_replace(source_root / "frida", site_packages / "frida")
+    copytree_replace(source_root / "_frida", site_packages / "_frida")
+    _, devkit_dir = build_frida_extension(data_root, python_version, source_root, site_packages / "_frida.abi3.so", cache_dir)
+    return (sdist_path.name, devkit_dir)
 
 
 def write_runtime_scripts(data_root: Path) -> None:
@@ -506,7 +474,6 @@ set -eu
 
 export PYTHONUNBUFFERED=1
 export PYTHONPATH="/opt/mira/frida-python/site-packages${PYTHONPATH:+:$PYTHONPATH}"
-export LD_PRELOAD="/opt/mira/frida-python/lib/libfrida-glibc-compat.so${LD_PRELOAD:+:$LD_PRELOAD}"
 
 if [ "${1:-}" = "--status" ]; then
     shift
@@ -537,7 +504,8 @@ def write_source_manifest(
     data_root: Path,
     python_version: str,
     pure_wheels: list[str],
-    frida_wheel: str,
+    frida_sdist_name: str,
+    frida_devkit_dir: str,
 ) -> None:
     manifest_path = data_root / "opt" / "mira" / "frida-python" / "SOURCE.txt"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -548,7 +516,8 @@ def write_source_manifest(
         f"frida-version: {FRIDA_VERSION}",
         f"frida-tools-version: {FRIDA_TOOLS_VERSION}",
         f"frida-runtime: {RUNTIME_VERSION}",
-        f"frida-wheel: {frida_wheel}",
+        f"frida-sdist: {frida_sdist_name}",
+        f"frida-devkit: {frida_devkit_dir}",
         "pure-python-wheels:",
     ]
     lines.extend(f"  - {wheel}" for wheel in pure_wheels)
@@ -564,10 +533,10 @@ def validate_layout(data_root: Path) -> None:
         data_root / "opt" / "mira" / "frida-python" / "site-packages" / "frida" / "__init__.py",
         data_root / "opt" / "mira" / "frida-python" / "site-packages" / "frida_tools" / "__init__.py",
         data_root / "opt" / "mira" / "frida-python" / "site-packages" / "_frida.abi3.so",
-        data_root / "opt" / "mira" / "frida-python" / "lib" / "libfrida-glibc-compat.so",
         data_root / "opt" / "mira" / "frida-state" / RUNTIME_VERSION,
-        data_root / "lib" / "ld-linux.so.2",
-        data_root / "lib" / "libc.so.6",
+        data_root / "lib" / "ld-musl-i386.so.1",
+        data_root / "lib" / "libc.musl-x86.so.1",
+        data_root / "usr" / "include" / f"python{detect_python_version(data_root)}" / "Python.h",
     )
     for path in required_paths:
         if not path.exists():
@@ -593,10 +562,9 @@ def main() -> int:
     site_packages.mkdir(parents=True, exist_ok=True)
     pure_wheels = install_pure_python_dependencies(site_packages, cache_dir / "wheels")
     install_vendored_frida_tools(site_packages)
-    frida_wheel = install_frida_wheel(site_packages, cache_dir / "frida-wheel")
-    install_frida_glibc_shim(data_root, cache_dir / "shim")
+    frida_sdist_name, frida_devkit_dir = install_frida_python_binding(data_root, python_version, site_packages, cache_dir / "frida-python")
     write_runtime_scripts(data_root)
-    write_source_manifest(data_root, python_version, pure_wheels, frida_wheel)
+    write_source_manifest(data_root, python_version, pure_wheels, frida_sdist_name, frida_devkit_dir)
     validate_layout(data_root)
 
     stamp_path.parent.mkdir(parents=True, exist_ok=True)
