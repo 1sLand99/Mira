@@ -127,14 +127,7 @@ public final class MiraToolbox implements Closeable {
             "mira-settings",
             "mira-getprop",
             "mira-dumpsys",
-            "mira-logcat",
-            "frida-status",
-            "frida-exec",
-            "frida-load",
-            "frida-hook",
-            "frida-call",
-            "frida-native-hook",
-            "frida-detach"
+            "mira-logcat"
         };
         for (String command : commands) {
             File wrapper = new File(binDir, command);

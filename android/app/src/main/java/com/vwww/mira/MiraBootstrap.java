@@ -137,7 +137,17 @@ public final class MiraBootstrap {
             "mira-settings",
             "mira-getprop",
             "mira-dumpsys",
-            "mira-logcat",
+            "mira-logcat"
+        };
+        File binDir = new File(prefixDir, "bin");
+        deleteLegacyFridaWrappers(binDir);
+        for (String command : commands) {
+            writeExecutable(new File(binDir, command), miraCommandScript(command));
+        }
+    }
+
+    private void deleteLegacyFridaWrappers(File binDir) throws IOException {
+        String[] legacyCommands = new String[] {
             "frida-status",
             "frida-exec",
             "frida-load",
@@ -146,9 +156,11 @@ public final class MiraBootstrap {
             "frida-native-hook",
             "frida-detach"
         };
-        File binDir = new File(prefixDir, "bin");
-        for (String command : commands) {
-            writeExecutable(new File(binDir, command), miraCommandScript(command));
+        for (String command : legacyCommands) {
+            File wrapper = new File(binDir, command);
+            if (wrapper.exists() && !wrapper.delete()) {
+                throw new IOException("无法删除旧版 Frida wrapper: " + wrapper.getAbsolutePath());
+            }
         }
     }
 
