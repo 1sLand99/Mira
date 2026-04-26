@@ -73,6 +73,6 @@ final class MiraControlViewModel: ObservableObject {
 
     private func refreshNativeStatus() {
         let native = MiraNativeStatus.current
-        statusText = "\(native.backendName): \(native.ptyLifecycle)"
+        statusText = "\(native.backendName): \(native.ptyLifecycle) | frida: \(native.fridaLifecycle)"
     }
 }

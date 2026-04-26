@@ -5,6 +5,10 @@ struct MiraApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = MiraControlViewModel()
 
+    init() {
+        MiraFridaLoader.ensureLoaded()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel)

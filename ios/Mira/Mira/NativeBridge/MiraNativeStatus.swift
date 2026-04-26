@@ -5,11 +5,17 @@ import Darwin
 struct MiraNativeStatus {
     let backendName: String
     let ptyLifecycle: String
+    let fridaLifecycle: String
 
+    @MainActor
     static var current: MiraNativeStatus {
         let backend = String(cString: mira_pty_ios_backend_name())
         let relay = String(cString: mira_ios_relay_status())
-        return MiraNativeStatus(backendName: backend, ptyLifecycle: relay)
+        return MiraNativeStatus(
+            backendName: backend,
+            ptyLifecycle: relay,
+            fridaLifecycle: MiraFridaLoader.statusText
+        )
     }
 
     static var installId: String {

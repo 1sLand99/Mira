@@ -12,6 +12,7 @@
 		A10000000000000000000003 /* MiraControlViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* MiraControlViewModel.swift */; };
 		A10000000000000000000004 /* MiraNativeStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* MiraNativeStatus.swift */; };
 		A30000000000000000000001 /* MiraRemoteServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000011 /* MiraRemoteServices.swift */; };
+		A30000000000000000000002 /* MiraFridaLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000012 /* MiraFridaLoader.swift */; };
 
 		A20000000000000000000001 /* mira_pty_ios_shim.c in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* mira_pty_ios_shim.c */; };
 		A20000000000000000000002 /* mira_ios_relay.c in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* mira_ios_relay.c */; };
@@ -31,6 +32,7 @@
 		A10000000000000000000013 /* MiraControlViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiraControlViewModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* MiraNativeStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiraNativeStatus.swift; sourceTree = "<group>"; };
 		A30000000000000000000011 /* MiraRemoteServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiraRemoteServices.swift; sourceTree = "<group>"; };
+		A30000000000000000000012 /* MiraFridaLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiraFridaLoader.swift; sourceTree = "<group>"; };
 
 		A20000000000000000000010 /* Mira-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Mira-Bridging-Header.h"; sourceTree = "<group>"; };
 		A20000000000000000000011 /* mira_pty_ios_shim.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "../../native/bridge/ios/mira_pty_ios_shim.c"; sourceTree = SOURCE_ROOT; };
@@ -97,6 +99,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000014 /* MiraNativeStatus.swift */,
+				A30000000000000000000012 /* MiraFridaLoader.swift */,
 				A30000000000000000000011 /* MiraRemoteServices.swift */,
 				A20000000000000000000010 /* Mira-Bridging-Header.h */,
 			);
@@ -133,6 +136,7 @@
 				A10000000000000000000020 /* Frameworks */,
 				A10000000000000000000051 /* Resources */,
 				A20000000000000000000080 /* Prepare iSH RootFS */,
+				A30000000000000000000080 /* Prepare Frida Gadget */,
 			);
 			buildRules = (
 			);
@@ -210,6 +214,27 @@
 			shellPath = /bin/sh;
 			shellScript = "\"${PROJECT_DIR}/../../tools/ios/prepare-ish-rootfs.sh\"";
 		};
+		A30000000000000000000080 /* Prepare Frida Gadget */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(PROJECT_DIR)/../../tools/ios/prepare-frida-gadget.sh",
+			);
+			name = "Prepare Frida Gadget";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Frameworks/libdynamic.dylib",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/libdynamic.config",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PROJECT_DIR}/../../tools/ios/prepare-frida-gadget.sh\"";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -231,6 +256,7 @@
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* MiraControlViewModel.swift in Sources */,
 				A10000000000000000000004 /* MiraNativeStatus.swift in Sources */,
+				A30000000000000000000002 /* MiraFridaLoader.swift in Sources */,
 				A30000000000000000000001 /* MiraRemoteServices.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
