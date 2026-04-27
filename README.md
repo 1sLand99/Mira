@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  面向 Android 与 iOS App 沙盒会话的 AI 原生运行时风险分析工作台.
+  面向 Android 与 iOS App 沙盒环境运行时风险分析工作台
 </p>
 
 <p align="center">
@@ -21,11 +21,6 @@
   <a href="./docs/THIRD-PARTY-NOTICES.md">Third-Party Notices</a>
 </p>
 
----
-
-Mira 允许 Agent 在授权的 App 沙盒会话中直接读取运行时信号, 理解系统 API, 识别可疑特征, 解释风险来源, 串起证据链, 并给出下一步验证路径.
-
-它不是 SDK, 不是远控框架, 也不是只会报点位的黑盒检测器. Mira 更像一个面向 AI 的移动运行时安全分析工作台, 把原本依赖经验和手工排查的分析流程, 变成可复用, 可验证, 可持续演进的运行时分析流程.
 
 ## 核心能力
 
