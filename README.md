@@ -24,11 +24,11 @@
 
 ## 核心能力
 
-### Built-in MCP 驱动的运行时风险探索
+### AI 运行时风险发现
+
+Mira 提供运行时真实沙盒视图, 且内置 frida 可实时执行任何 Java/Native 逻辑, 比动态 dex 更快
 
 ![claude 分析算法助手的 hook 痕迹](./docs/Area.gif)
-
-Mira 提供 AI 通过公网进入 App 沙盒运行时的 MCP 入口, 从当前进程, 沙盒文件视图, PTY 输出, 运行时状态和 App 自身画面中收集/观察/分析可疑信号并使用 Agent 能力进一步探索.
 
 ### Android / iOS 双端运行时工作台
 
