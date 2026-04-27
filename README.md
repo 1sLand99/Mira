@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  面向 Android 与 iOS App 沙盒环境运行时风险分析工作台
+  AI 时代移动安全防护策略快速产出工具
 </p>
 
 <p align="center">
