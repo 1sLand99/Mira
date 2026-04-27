@@ -17,7 +17,7 @@ from pathlib import Path
 
 FRIDA_VERSION = "16.0.7"
 FRIDA_TOOLS_VERSION = "12.1.0"
-RUNTIME_VERSION = "official-frida-tools-12.1.0-frida-16.0.7-v6"
+RUNTIME_VERSION = "official-frida-tools-12.1.0-frida-16.0.7-v9"
 ALPINE_VERSION = "v3.19"
 ALPINE_ARCH = "x86"
 ALPINE_REPOS = (
@@ -42,6 +42,16 @@ ROOT_DIR = SCRIPT_PATH.parents[2]
 FRIDA_TOOLS_DIR = ROOT_DIR / "third_party" / "frida-tools"
 FRIDA_SDIST_CANDIDATES = (
     ROOT_DIR / "build" / "termux-prefix" / "sdists" / f"frida-{FRIDA_VERSION}.tar.gz",
+)
+FRIDA_CC_CANDIDATES = (
+    ROOT_DIR / "build" / f"frida-src-{FRIDA_VERSION}" / "build" / "musl-wrap" / "i686-linux-musl-gcc",
+)
+FRIDA_STRIP_CANDIDATES = (
+    ROOT_DIR / "build" / f"frida-src-{FRIDA_VERSION}" / "build" / "toolchain-macos-arm64" / "bin" / "llvm-strip",
+    ROOT_DIR / "build" / f"frida-src-{FRIDA_VERSION}" / "build" / "musl-wrap" / "i686-linux-musl-strip",
+)
+FRIDA_SDK_LIB_CANDIDATES = (
+    ROOT_DIR / "build" / f"frida-src-{FRIDA_VERSION}" / "build" / "sdk-linux-x86" / "lib",
 )
 FRIDA_MUSL_DEVKIT_ENV = "MIRA_IOS_FRIDA_DEVKIT_DIR"
 FRIDA_CC_ENV = "MIRA_IOS_FRIDA_CC"
@@ -351,6 +361,14 @@ def resolve_host_tool(env_name: str, fallback_names: tuple[str, ...]) -> list[st
     override = os.environ.get(env_name, "").strip()
     if override:
         return override.split()
+    local_candidates: tuple[Path, ...] = ()
+    if env_name == FRIDA_CC_ENV:
+        local_candidates = FRIDA_CC_CANDIDATES
+    elif env_name == FRIDA_STRIP_ENV:
+        local_candidates = FRIDA_STRIP_CANDIDATES
+    for candidate in local_candidates:
+        if candidate.is_file():
+            return [str(candidate)]
     for name in fallback_names:
         path = shutil.which(name)
         if path:
@@ -378,8 +396,16 @@ def ensure_frida_musl_devkit(cache_dir: Path) -> Path:
     )
 
 
+def ensure_frida_sdk_libdir() -> Path:
+    for candidate in FRIDA_SDK_LIB_CANDIDATES:
+        if (candidate / "libucontext.so").is_file() or (candidate / "libucontext.a").is_file():
+            return candidate
+    raise FileNotFoundError("缺少 linux-x86 musl SDK lib 目录, 无法链接 libucontext")
+
+
 def build_frida_extension(data_root: Path, python_version: str, source_root: Path, output_path: Path, cache_dir: Path) -> tuple[str, str]:
     devkit_dir = ensure_frida_musl_devkit(cache_dir)
+    sdk_lib_dir = ensure_frida_sdk_libdir()
     cc = resolve_host_tool(FRIDA_CC_ENV, ("i686-linux-musl-gcc",))
     strip = None
     try:
@@ -405,6 +431,29 @@ def build_frida_extension(data_root: Path, python_version: str, source_root: Pat
         ),
         encoding="utf-8",
     )
+    compat_source = build_root / "frida_linux_musl_compat.c"
+    compat_source.write_text(
+        "\n".join(
+            [
+                "#define _GNU_SOURCE",
+                "#include <errno.h>",
+                "#include <linux/stat.h>",
+                "#include <sys/syscall.h>",
+                "#include <unistd.h>",
+                "",
+                "int statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *statbuf) {",
+                "#ifdef SYS_statx",
+                "    return syscall(SYS_statx, dirfd, pathname, flags, mask, statbuf);",
+                "#else",
+                "    errno = ENOSYS;",
+                "    return -1;",
+                "#endif",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     python_lib_name = f"python{python_version}"
@@ -414,15 +463,16 @@ def build_frida_extension(data_root: Path, python_version: str, source_root: Pat
         "-fPIC",
         "-ffunction-sections",
         "-fdata-sections",
-        f"--sysroot={data_root}",
         f"-I{devkit_dir}",
         f"-I{data_root / 'usr' / 'include'}",
         f"-I{data_root / 'usr' / 'include' / f'python{python_version}'}",
         str(source_root / "src" / "_frida.c"),
+        str(compat_source),
         "-o",
         str(output_path),
         f"-L{devkit_dir}",
         "-lfrida-core",
+        f"-L{sdk_lib_dir}",
         f"-L{data_root / 'usr' / 'lib'}",
         f"-l{python_lib_name}",
         "-ldl",

@@ -28,3 +28,5 @@ android/app/.externalNativeBuild/
 # Xcode user state
 xcuserdata/
 *.xcuserstate
+
+ios/Mira/Mira/Resources/MiraISHRoot.fakefs/
