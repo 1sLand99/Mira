@@ -126,12 +126,84 @@ detect_ios_device_id() {
   '
 }
 
+launch_device_app_with_devicectl() {
+  local device_id="$1"
+  local bundle_id="$2"
+  local output
+  local status
+
+  if ! command -v xcrun >/dev/null 2>&1; then
+    return 127
+  fi
+
+  set +e
+  output="$(xcrun devicectl device process launch \
+    --device "${device_id}" \
+    --terminate-existing \
+    --activate \
+    "${bundle_id}" 2>&1)"
+  status=$?
+  set -e
+
+  printf '%s\n' "${output}"
+  return "${status}"
+}
+
+install_device_app() {
+  local ios_deploy="$1"
+  local device_id="$2"
+  local app_path="$3"
+  local bundle_id="$4"
+  local output
+  local status
+
+  set +e
+  output="$("${ios_deploy}" \
+    --id "${device_id}" \
+    --bundle "${app_path}" \
+    --faster-path-search 2>&1)"
+  status=$?
+  set -e
+
+  printf '%s\n' "${output}"
+  if [[ ${status} -eq 0 ]]; then
+    return 0
+  fi
+
+  if [[ "${output}" == *"0xe8000067"* || "${output}" == *"internal API error"* ]]; then
+    echo "Install hit internal API error, retrying after uninstall ..." >&2
+    "${ios_deploy}" \
+      --id "${device_id}" \
+      --bundle_id "${bundle_id}" \
+      --uninstall_only \
+      --faster-path-search >/dev/null 2>&1 || true
+
+    "${ios_deploy}" \
+      --id "${device_id}" \
+      --bundle "${app_path}" \
+      --uninstall \
+      --faster-path-search
+    return 0
+  fi
+
+  return "${status}"
+}
+
 launch_device_app() {
   local ios_deploy="$1"
   local device_id="$2"
   local app_path="$3"
+  local bundle_id="$4"
   local output
   local status
+
+  if output="$(launch_device_app_with_devicectl "${device_id}" "${bundle_id}")"; then
+    printf '%s\n' "${output}"
+    return 0
+  fi
+  status=$?
+  printf '%s\n' "${output}"
+  echo "devicectl launch failed, falling back to ios-deploy ..." >&2
 
   set +e
   output="$("${ios_deploy}" \
@@ -189,13 +261,10 @@ run_device() {
     --faster-path-search >/dev/null 2>&1 || true
 
   echo "Installing Mira app with ios-deploy ..."
-  "${ios_deploy}" \
-    --id "${device_id}" \
-    --bundle "${DEVICE_APP_PATH}" \
-    --faster-path-search
+  install_device_app "${ios_deploy}" "${device_id}" "${DEVICE_APP_PATH}" "${BUNDLE_ID}"
 
   echo "Restarting Mira app ..."
-  launch_device_app "${ios_deploy}" "${device_id}" "${DEVICE_APP_PATH}"
+  launch_device_app "${ios_deploy}" "${device_id}" "${DEVICE_APP_PATH}" "${BUNDLE_ID}"
 
   cat <<MSG
 
