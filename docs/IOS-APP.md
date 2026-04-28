@@ -114,9 +114,53 @@ idb --udid <device-udid> launch com.vwww.mira.ios
 如果直接使用仓库脚本, 可开启真机自动启动并注入 Relay URL:
 
 ```bash
+git submodule update --init --recursive
+bash ./tools/ios/build-frida-musl-devkit.sh
 MIRA_IOS_AUTO_LAUNCH_DEVICE=1 \
 MIRA_IOS_RELAY_URL="http://<电脑局域网IP>:8765" \
 ./mira-ios --device
+```
+
+### fresh clone 恢复说明
+
+这条链路不是 clone 完就一定能直接跑起来, 首次真机恢复时通常还要补齐下面几类前置物:
+
+1. `third_party/ish` 子模块.
+2. iSH 真机静态库, 例如 `build/ios-ish-device-libs/.../libish.a`.
+3. iSH host tools, 例如 `build/ios-ish-host-tools/ish` 和 `build/ios-ish-host-tools/tools/fakefsify`.
+4. Frida musl devkit, 默认输出到 `build/frida/devkit/16.0.7/linux-x86-musl`.
+
+如果 `./mira-ios --device` 卡在 `Prepare iSH RootFS`, 先优先检查:
+
+1. 当前 shell 是否带了 `LIBRARY_PATH` 或 `SDKROOT` 这类宿主机路径污染.
+2. iSH host tools 是否是在干净环境里构建的.
+
+当前已验证可工作的真机构建基线是:
+
+```bash
+env -u LIBRARY_PATH -u SDKROOT \
+xcodebuild \
+  -project ios/Mira/Mira.xcodeproj \
+  -scheme Mira \
+  -configuration Debug \
+  -sdk iphoneos \
+  -destination 'id=<device-udid>' \
+  -derivedDataPath build/ios-mira-device-native-relay-derived \
+  -allowProvisioningUpdates \
+  -allowProvisioningDeviceRegistration \
+  ENABLE_DEBUG_DYLIB=NO \
+  ENABLE_PREVIEWS=NO \
+  build
+```
+
+安装和启动基线是:
+
+```bash
+idb connect <device-udid>
+idb install --udid <device-udid> build/ios-mira-device-native-relay-derived/Build/Products/Debug-iphoneos/Mira.app
+IDB_MIRA_RELAY_URL="http://<电脑局域网IP>:8765" \
+IDB_MIRA_AUTO_CONNECT=1 \
+idb launch --udid <device-udid> com.vwww.mira.ios
 ```
 
 ## Relay 联调路径

@@ -290,11 +290,25 @@ prepare_source_tree() {
   mkdir -p "$BUILD_ROOT" "$(dirname "$OUTPUT_DIR")"
 
   if [[ ! -d "$SOURCE_DIR/.git" ]]; then
-    git clone --branch "$FRIDA_VERSION" --recurse-submodules https://github.com/frida/frida.git "$SOURCE_DIR"
+    git clone --branch "$FRIDA_VERSION" https://github.com/frida/frida.git "$SOURCE_DIR"
+    (
+      cd "$SOURCE_DIR"
+      git submodule update --init --depth 1 \
+        releng/meson \
+        frida-core \
+        frida-gum \
+        frida-python \
+        frida-tools
+    )
   else
     log "reuse existing source tree: $SOURCE_DIR"
     git -C "$SOURCE_DIR" checkout --force "$FRIDA_VERSION"
   fi
+
+  (
+    cd "$SOURCE_DIR"
+    make -f Makefile.sdk.mk deps/.zlib-stamp deps/.libffi-stamp deps/.glib-stamp
+  )
 
   apply_source_patches
 }
@@ -333,7 +347,13 @@ patch_native_env_files() {
     return
   fi
 
-  MIRA_FRIDA_MACHINE_FILE="$SOURCE_DIR/build/fs-$HOST_MACHINE.txt" python3 - <<'PY'
+  local machine_file
+  machine_file="$SOURCE_DIR/build/fs-$HOST_MACHINE.txt"
+  if [[ ! -f "$machine_file" ]]; then
+    machine_file="$SOURCE_DIR/build/frida-$HOST_MACHINE.txt"
+  fi
+
+  MIRA_FRIDA_MACHINE_FILE="$machine_file" python3 - <<'PY'
 from pathlib import Path
 import os
 import re
@@ -501,6 +521,7 @@ prepare_linux_cross_env() {
 
 build_linux_sdk() {
   log "build linux-x86 musl sdk"
+  patch_cross_machine_file "$SOURCE_DIR/build/fs-linux-x86.txt"
   (
     cd "$SOURCE_DIR"
     rm -rf build/fs-linux-x86 build/fs-tmp-linux-x86 build/sdk-linux-x86 build/sdk-linux-x86.tar.bz2
@@ -589,6 +610,7 @@ for relative in (
 PY
   (
     cd "$SOURCE_DIR"
+    make git-submodule-stamps
     python3 releng/generate-version-header.py build/frida-version.h
     FRIDA_CONNECTIVITY="$FRIDA_BUILD_CONNECTIVITY" \
     FRIDA_V8="$FRIDA_BUILD_V8" \
