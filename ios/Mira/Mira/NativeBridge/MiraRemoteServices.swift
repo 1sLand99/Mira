@@ -121,6 +121,7 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
     private var encodedSize = CGSize(width: 1, height: 1)
     private var sourceSize = CGSize(width: 1, height: 1)
     private var lastRenderFailureReason = ""
+    private var socketOpen = false
 
     init(screenState: MiraRemoteScreenState) {
         self.screenState = screenState
@@ -147,6 +148,7 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
 
     private func stopOnQueue() {
         running = false
+        socketOpen = false
         timer?.cancel()
         timer = nil
         if let compressionSession {
@@ -174,10 +176,9 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
         let nextSocket = nextSession.webSocketTask(with: url)
         session = nextSession
         socket = nextSocket
+        socketOpen = false
         nextSocket.resume()
         receiveLoop(task: nextSocket)
-        configureEncoderAndTimer()
-        sendScreenInfo()
     }
 
     private func scheduleReconnect(reason: String) {
@@ -187,6 +188,7 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
         timer = nil
         queue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self, self.running else { return }
+            self.socketOpen = false
             self.socket?.cancel(with: .goingAway, reason: nil)
             self.session?.invalidateAndCancel()
             self.socket = nil
@@ -272,7 +274,7 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
     }
 
     private func captureAndEncodeFrame() {
-        guard running, let compressionSession else { return }
+        guard running, socketOpen, let compressionSession else { return }
         let sizes = captureSizes()
         if abs(sizes.encoded.width - encodedSize.width) > 0.5 || abs(sizes.encoded.height - encodedSize.height) > 0.5 {
             sourceSize = sizes.source
@@ -328,7 +330,7 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
     }
 
     private func sendScreenInfo() {
-        guard running else { return }
+        guard running, socketOpen else { return }
         let installId = MiraNativeStatus.installId
         guard !installId.isEmpty else { return }
         let payload: [String: Any] = [
@@ -476,6 +478,13 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
 extension MiraRemoteScreenStreamer {
     nonisolated func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         miraRelayDeviceLog(level: "INFO", scope: "screen.stream", message: "screen websocket opened", details: ["protocol": `protocol` ?? ""])
+        queue.async { [weak self, weak webSocketTask] in
+            guard let self, let webSocketTask else { return }
+            guard self.running, self.socket === webSocketTask else { return }
+            self.socketOpen = true
+            self.configureEncoderAndTimer()
+            self.sendScreenInfo()
+        }
     }
 
     nonisolated func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
@@ -484,6 +493,12 @@ extension MiraRemoteScreenStreamer {
             reasonText = String(data: reason, encoding: .utf8) ?? reason.base64EncodedString()
         } else {
             reasonText = ""
+        }
+        queue.async { [weak self, weak webSocketTask] in
+            guard let self, let webSocketTask else { return }
+            if self.socket === webSocketTask {
+                self.socketOpen = false
+            }
         }
         miraRelayDeviceLog(level: "WARN", scope: "screen.stream", message: "screen websocket closed", details: ["closeCode": closeCode.rawValue, "reason": reasonText])
     }
