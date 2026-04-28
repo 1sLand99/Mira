@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Server } from 'lucide-react';
 import { BackgroundGlow, Lobby, MiraBrandBar } from '@/components/ConsoleChrome';
 import type { ConsoleEvent } from '@/components/TerminalStage';
 import { Workbench } from '@/components/Workbench';
@@ -12,6 +13,7 @@ export default function RelayConsolePage() {
   const [devices, setDevices] = useState<MiraDevice[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [events, setEvents] = useState<ConsoleEvent[]>([]);
+  const [activePanel, setActivePanel] = useState<'server-logs' | null>(null);
   const devicesSnapshot = useRef('');
 
   const selectedDevice = useMemo(
@@ -65,6 +67,7 @@ export default function RelayConsolePage() {
   const backToLobby = useCallback(() => {
     setSelectedId(null);
     window.location.hash = '';
+    setActivePanel(null);
   }, []);
 
   return (
@@ -72,6 +75,17 @@ export default function RelayConsolePage() {
       <BackgroundGlow />
       <div className="relative z-10 flex h-full flex-col">
         <MiraBrandBar />
+        {selectedDevice ? (
+          <div className="pointer-events-none absolute right-3 top-1.5 z-30 flex items-center gap-1">
+            <ToolbarIconButton
+              title={activePanel === 'server-logs' ? '关闭服务端日志' : '打开服务端日志'}
+              active={activePanel === 'server-logs'}
+              onClick={() => setActivePanel((current) => (current === 'server-logs' ? null : 'server-logs'))}
+            >
+              <Server className="h-3.5 w-3.5" strokeWidth={1.8} />
+            </ToolbarIconButton>
+          </div>
+        ) : null}
         {selectedDevice ? (
           <Workbench
             devices={devices}
@@ -81,11 +95,40 @@ export default function RelayConsolePage() {
             onBack={backToLobby}
             onEvent={pushEvent}
             onRefreshDevices={refreshDevices}
+            activePanel={activePanel}
+            onClosePanel={() => setActivePanel(null)}
           />
         ) : (
           <Lobby devices={devices} onSelect={selectDevice} />
         )}
       </div>
     </main>
+  );
+}
+
+function ToolbarIconButton({
+  title,
+  active,
+  onClick,
+  children,
+}: {
+  title: string;
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`pointer-events-auto grid h-7 w-7 place-items-center rounded border transition ${
+        active
+          ? 'border-[#6c9ff0] bg-[#e9f2ff] text-[#2f6fd0] shadow-sm'
+          : 'border-[#c2c2c2] bg-[#fafafa] text-[#555] hover:bg-white'
+      }`}
+    >
+      {children}
+    </button>
   );
 }

@@ -9,10 +9,14 @@ import json
 import mimetypes
 import posixpath
 import socket
+import sys
+import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,6 +40,53 @@ MAX_SCREEN_FRAME_DIMENSION = 8192
 MAX_SCREEN_INPUT_TEXT = 20_000
 SCREEN_STREAM_BOUNDARY = "mira-screen-frame"
 SESSION_ATTACH_GRACE_SECONDS = 5.0
+SERVER_LOG_LIMIT = 2000
+_SERVER_LOG_LOCK = threading.Lock()
+_SERVER_LOG_SEQ = 0
+_SERVER_LOG_RING: deque[dict[str, Any]] = deque(maxlen=SERVER_LOG_LIMIT)
+
+
+def relay_log(message: str) -> None:
+    global _SERVER_LOG_SEQ
+    text = str(message).replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines = lines[:-1]
+    if not lines:
+        lines = [""]
+    now = time.time()
+    with _SERVER_LOG_LOCK:
+        for line in lines:
+            _SERVER_LOG_SEQ += 1
+            _SERVER_LOG_RING.append({"cursor": _SERVER_LOG_SEQ, "at": now, "line": line})
+    stdout = getattr(sys, "__stdout__", None) or sys.stdout
+    stdout.write(text if text.endswith("\n") else text + "\n")
+    stdout.flush()
+
+
+def relay_exc_text(exc: BaseException) -> str:
+    return f"{exc.__class__.__name__}: {exc}"
+
+
+def read_server_logs(cursor: int = 0, limit: int = 400) -> dict[str, Any]:
+    limit = max(1, min(limit, SERVER_LOG_LIMIT))
+    with _SERVER_LOG_LOCK:
+        entries = list(_SERVER_LOG_RING)
+    if not entries:
+        return {"entries": [], "nextCursor": cursor, "reset": False}
+    oldest_cursor = int(entries[0]["cursor"])
+    latest_cursor = int(entries[-1]["cursor"])
+    if cursor <= 0:
+        selected = entries[-limit:]
+        return {"entries": selected, "nextCursor": latest_cursor, "reset": False}
+    if cursor < oldest_cursor:
+        selected = entries[-limit:]
+        return {"entries": selected, "nextCursor": latest_cursor, "reset": True}
+    selected = [entry for entry in entries if int(entry["cursor"]) > cursor]
+    if len(selected) > limit:
+        selected = selected[-limit:]
+        return {"entries": selected, "nextCursor": latest_cursor, "reset": True}
+    return {"entries": selected, "nextCursor": latest_cursor, "reset": False}
 
 
 @dataclass(eq=False)
@@ -65,6 +116,12 @@ class DeviceRecord:
 
 
 @dataclass
+class PendingControlRequest:
+    install_id: str
+    future: asyncio.Future[dict[str, Any]]
+
+
+@dataclass
 class RelaySession:
     session_id: str
     install_id: str
@@ -89,6 +146,7 @@ class RelayState:
         self.advertise_url_file = Path(advertise_url_file) if advertise_url_file else None
         self.devices: dict[str, DeviceRecord] = {}
         self.sessions: dict[str, RelaySession] = {}
+        self.pending_control_requests: dict[str, PendingControlRequest] = {}
         self.lock = asyncio.Lock()
 
     @property
@@ -156,6 +214,15 @@ def parse_json_body(body: bytes) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("JSON body must be an object")
     return data
+
+
+def int_query_field(values: dict[str, list[str]], key: str, default: int, minimum: int, maximum: int) -> int:
+    raw = values.get(key, [str(default)])[0]
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))
 
 
 def file_response(path: Path) -> bytes:
@@ -267,7 +334,10 @@ async def broadcast_screen_clients(record: DeviceRecord, payload: dict[str, Any]
     for browser in list(record.screen_clients):
         try:
             await send_frame(browser.writer, data, opcode=opcode, lock=browser.lock)
-        except Exception:
+        except Exception as exc:
+            relay_log(
+                f"Broadcast to screen browser failed installId={record.install_id} opcode={opcode} error={relay_exc_text(exc)}"
+            )
             dead.append(browser)
     for browser in dead:
         record.screen_clients.discard(browser)
@@ -324,12 +394,80 @@ async def send_screen_input_to_device(state: RelayState, install_id: str, payloa
         control_writer = record.control_writer
         control_lock = record.control_lock
     if control_writer is None or control_writer.is_closing():
+        relay_log(f"Screen input rejected installId={install_id} kind={payload.get('kind')} reason=device control channel is not connected")
         return False, "device control channel is not connected"
     try:
         await send_json(control_writer, control_lock, payload)
     except Exception as exc:  # noqa: BLE001
+        relay_log(f"Screen input send failed installId={install_id} kind={payload.get('kind')} error={relay_exc_text(exc)}")
         return False, f"screen input failed: {exc}"
     return True, ""
+
+
+async def send_control_message_to_device(state: RelayState, install_id: str, payload: dict[str, Any]) -> tuple[bool, str]:
+    async with state.lock:
+        record = state.devices.get(install_id)
+        if record is None:
+            return False, "device not found"
+        control_writer = record.control_writer
+        control_lock = record.control_lock
+    if control_writer is None or control_writer.is_closing():
+        return False, "device control channel is not connected"
+    try:
+        await send_json(control_writer, control_lock, payload)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"device control send failed: {exc}"
+    return True, ""
+
+
+async def send_control_request(
+    state: RelayState,
+    install_id: str,
+    payload: dict[str, Any],
+    timeout: float = 8.0,
+) -> tuple[bool, str, dict[str, Any] | None]:
+    request_id = str(payload.get("requestId") or "").strip()
+    if not request_id:
+        return False, "missing requestId", None
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    async with state.lock:
+        record = state.devices.get(install_id)
+        if not record:
+            return False, "device not found", None
+        control_writer = record.control_writer
+        control_lock = record.control_lock
+        if control_writer is None or control_writer.is_closing():
+            return False, "device control channel is not connected", None
+        state.pending_control_requests[request_id] = PendingControlRequest(install_id=install_id, future=future)
+    relay_log(
+        f"Control request queued installId={install_id} requestId={request_id} command={payload.get('command')} timeout={timeout:.1f}s"
+    )
+    try:
+        await send_json(control_writer, control_lock, payload)
+    except Exception as exc:  # noqa: BLE001
+        async with state.lock:
+            state.pending_control_requests.pop(request_id, None)
+        relay_log(f"Failed to send control request installId={install_id} requestId={request_id}: {exc}")
+        return False, f"send control request failed: {exc}", None
+
+    try:
+        message = await asyncio.wait_for(future, timeout)
+    except asyncio.TimeoutError:
+        async with state.lock:
+            same_install_pending = [
+                item_id for item_id, item in state.pending_control_requests.items() if item.install_id == install_id
+            ]
+        relay_log(
+            f"Control request timeout installId={install_id} requestId={request_id} timeout={timeout:.1f}s pending={same_install_pending}"
+        )
+        return False, f"device control request timeout after {timeout:.1f}s", None
+    finally:
+        async with state.lock:
+            state.pending_control_requests.pop(request_id, None)
+    if not isinstance(message, dict):
+        return False, "invalid control response", None
+    return True, "", message
 
 
 def device_payload(record: DeviceRecord) -> dict[str, Any]:
@@ -370,6 +508,37 @@ async def api_discover(state: RelayState, body: dict[str, Any]) -> bytes:
         return json_response("200 OK", {"devices": [device_payload(record) for record in state.devices.values()]})
 
 
+async def api_server_logs(query: dict[str, list[str]]) -> bytes:
+    cursor = int_query_field(query, "cursor", 0, 0, 2_000_000_000)
+    limit = int_query_field(query, "limit", 300, 1, 1000)
+    payload = read_server_logs(cursor=cursor, limit=limit)
+    entries = payload["entries"]
+    return json_response(
+        "200 OK",
+        {
+            "entries": entries,
+            "lines": [str(entry.get("line") or "") for entry in entries],
+            "nextCursor": int(payload["nextCursor"]),
+            "reset": bool(payload["reset"]),
+        },
+    )
+
+
+async def api_browser_log(body: dict[str, Any]) -> bytes:
+    scope = str(body.get("scope") or "browser").strip() or "browser"
+    message = str(body.get("message") or "").strip() or "-"
+    install_id = str(body.get("installId") or "").strip() or "-"
+    details = body.get("details")
+    suffix = ""
+    if details not in (None, "", {}, []):
+        try:
+            suffix = f" details={json.dumps(details, ensure_ascii=False, separators=(',', ':'))}"
+        except (TypeError, ValueError):
+            suffix = f" details={details}"
+    relay_log(f"Browser log installId={install_id} scope={scope} message={message}{suffix}")
+    return json_response("200 OK", {"ok": True})
+
+
 async def api_devices(state: RelayState) -> bytes:
     async with state.lock:
         return json_response("200 OK", {"devices": [device_payload(record) for record in state.devices.values()]})
@@ -408,7 +577,7 @@ async def api_outline(state: RelayState, body: dict[str, Any]) -> bytes:
         record.last_seen = now
     nodes = outline.get("nodes")
     node_count = len(nodes) if isinstance(nodes, list) else outline.get("nodeCount", "unknown")
-    print(f"Received outline installId={install_id} nodes={node_count}", flush=True)
+    relay_log(f"Received outline installId={install_id} nodes={node_count}")
     return json_response("200 OK", {"ok": True, "outlineLastSeen": now})
 
 
@@ -432,6 +601,94 @@ def float_field(body: dict[str, Any], name: str) -> float | None:
     if not value == value or value in {float("inf"), float("-inf")}:
         return None
     return value
+
+
+def normalize_logcat_level(raw: str) -> str | None:
+    if not raw:
+        return None
+    level = raw.strip().upper()
+    if not level:
+        return None
+    aliases = {
+        "VERBOSE": "V",
+        "DEBUG": "D",
+        "INFO": "I",
+        "WARN": "W",
+        "ERROR": "E",
+        "FATAL": "F",
+        "SILENT": "S",
+        "ASSERT": "A",
+    }
+    if level in aliases:
+        return aliases[level]
+    if len(level) == 1 and level in {"V", "D", "I", "W", "E", "F", "S", "A"}:
+        return level
+    return None
+
+
+def build_logcat_args(body: dict[str, Any]) -> tuple[list[str], str | None]:
+    count = int_field(body, "count", 1, 5000)
+    if count is None:
+        return [], "invalid logcat count"
+    tag = str(body.get("tag") or "").strip()
+    level = normalize_logcat_level(str(body.get("level") or "").strip())
+    if body.get("level") not in (None, "") and level is None:
+        return [], "invalid logcat level"
+
+    args: list[str] = ["-d", "-t", str(count), "-v", "time"]
+    if tag:
+        if level:
+            args.append(f"{tag}:{level}")
+        else:
+            args.extend(["--tag", tag])
+    elif level:
+        args.append(f"*:{level}")
+    return args, None
+
+
+async def api_device_logcat(state: RelayState, body: dict[str, Any]) -> bytes:
+    install_id = str(body.get("installId") or "").strip()
+    if not install_id:
+        return json_response("400 Bad Request", {"error": "missing installId"})
+    args, error = build_logcat_args(body)
+    if error:
+        return json_response("400 Bad Request", {"error": error})
+    request_timeout = int_field(body, "timeoutMs", 1000, 30000)
+    if request_timeout is None:
+        request_timeout = 15000
+    request_id = uuid.uuid4().hex
+    payload = {
+        "type": "device.command",
+        "protocol": PROTOCOL_VERSION,
+        "installId": install_id,
+        "requestId": request_id,
+        "command": "mira-logcat",
+        "arguments": args,
+        "timeoutMs": request_timeout,
+    }
+    request_timeout_seconds = request_timeout / 1000 + 5.0
+    ok, send_error, response = await send_control_request(state, install_id, payload, request_timeout_seconds)
+    if not ok:
+        if send_error == "device not found":
+            return json_response("404 Not Found", {"error": send_error})
+        if "not connected" in send_error:
+            return json_response("409 Conflict", {"error": send_error})
+        if send_error.startswith("device control request timeout"):
+            return json_response("504 Gateway Timeout", {"error": send_error})
+        return json_response("502 Bad Gateway", {"error": send_error})
+    return json_response(
+        "200 OK",
+        {
+            "ok": bool(response.get("ok")),
+            "installId": response.get("installId", install_id),
+            "requestId": response.get("requestId", request_id),
+            "command": response.get("command", "mira-logcat"),
+            "exitCode": response.get("exitCode", 1),
+            "stdout": response.get("stdout", ""),
+            "stderr": response.get("stderr", ""),
+            "error": response.get("error", ""),
+        },
+    )
 
 
 async def api_screen_frame(state: RelayState, body: dict[str, Any]) -> bytes:
@@ -501,7 +758,7 @@ async def api_screen_frame(state: RelayState, body: dict[str, Any]) -> bytes:
         record.screen_frame = frame
         record.screen_last_seen = now
         record.last_seen = now
-    print(f"Received screen frame installId={install_id} seq={seq} size={width}x{height}", flush=True)
+    relay_log(f"Received screen frame installId={install_id} seq={seq} size={width}x{height}")
     return json_response("200 OK", {"ok": True, "screenLastSeen": now, "seq": seq})
 
 
@@ -667,7 +924,7 @@ async def api_open(state: RelayState, body: dict[str, Any]) -> bytes:
             if record := state.devices.get(install_id):
                 record.data["state"] = "offline"
         return json_response("409 Conflict", {"error": "device control channel is not connected"})
-    print(f"Opened session {session_id} for {install_id}", flush=True)
+    relay_log(f"Opened session {session_id} for {install_id}")
     return json_response("200 OK", {"sessionId": session_id})
 
 
@@ -703,7 +960,7 @@ async def api_close(state: RelayState, body: dict[str, Any]) -> bytes:
 
 async def handle_device_ws(state: RelayState, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, headers: dict[str, str]) -> None:
     peer = writer.get_extra_info("peername")
-    print(f"Device websocket from {peer}", flush=True)
+    relay_log(f"Device websocket from {peer}")
     writer.write(handshake_response(headers))
     await writer.drain()
     session: RelaySession | None = None
@@ -712,7 +969,7 @@ async def handle_device_ws(state: RelayState, reader: asyncio.StreamReader, writ
         attach = json.loads(frame.payload.decode("utf-8"))
         if attach.get("type") != "device.attach":
             await send_json(writer, asyncio.Lock(), {"type": "error", "error": "invalid device attach"})
-            print(f"Invalid device attach from {peer}: {attach}", flush=True)
+            relay_log(f"Invalid device attach from {peer}: {attach}")
             return
         session_id = str(attach.get("sessionId") or "")
         install_id = str(attach.get("installId") or "")
@@ -720,7 +977,7 @@ async def handle_device_ws(state: RelayState, reader: asyncio.StreamReader, writ
             session = state.sessions.get(session_id)
             if not session or session.install_id != install_id:
                 await send_json(writer, asyncio.Lock(), {"type": "error", "error": "unknown session"})
-                print(f"Unknown device session from {peer}: session={session_id} installId={install_id}", flush=True)
+                relay_log(f"Unknown device session from {peer}: session={session_id} installId={install_id}")
                 return
             session.device_writer = writer
             session.device_lock = asyncio.Lock()
@@ -729,7 +986,7 @@ async def handle_device_ws(state: RelayState, reader: asyncio.StreamReader, writ
             if record := state.devices.get(install_id):
                 record.data["state"] = "active"
                 record.last_seen = time.time()
-        print(f"Device attached session={session_id} installId={install_id}", flush=True)
+        relay_log(f"Device attached session={session_id} installId={install_id}")
         if pending_resize is not None:
             await send_json(writer, session.device_lock, pending_resize)
         await broadcast_session(session, {"type": "session.status", "sessionId": session_id, "state": "active"})
@@ -773,7 +1030,7 @@ async def handle_device_ws(state: RelayState, reader: asyncio.StreamReader, writ
 
 async def handle_control_ws(state: RelayState, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, headers: dict[str, str]) -> None:
     peer = writer.get_extra_info("peername")
-    print(f"Control websocket from {peer}", flush=True)
+    relay_log(f"Control websocket from {peer}")
     writer.write(handshake_response(headers))
     await writer.drain()
     lock = asyncio.Lock()
@@ -807,7 +1064,7 @@ async def handle_control_ws(state: RelayState, reader: asyncio.StreamReader, wri
             record.control_writer = writer
             record.control_lock = lock
         await send_json(writer, lock, {"type": "control.ready", "protocol": PROTOCOL_VERSION, "installId": install_id})
-        print(f"Device registered installId={install_id} address={address}", flush=True)
+        relay_log(f"Device registered installId={install_id} address={address}")
         while True:
             frame = await read_frame(reader)
             if frame.is_close:
@@ -872,14 +1129,41 @@ async def handle_control_ws(state: RelayState, reader: asyncio.StreamReader, wri
                         continue
                     clients_record = record
                 await broadcast_screen_clients(clients_record, message)
-    except (WebSocketClosed, asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
-        pass
+            elif message.get("type") == "device.log":
+                scope = str(message.get("scope") or "device")
+                level = str(message.get("level") or "INFO").upper()
+                text = str(message.get("message") or "").strip()
+                details = message.get("details")
+                suffix = ""
+                if details not in (None, "", {}, []):
+                    try:
+                        suffix = f" details={json.dumps(details, ensure_ascii=False, separators=(',', ':'))}"
+                    except (TypeError, ValueError):
+                        suffix = f" details={details}"
+                relay_log(f"Device log installId={install_id} level={level} scope={scope} message={text or '-'}{suffix}")
+            elif message.get("type") == "device.command.result":
+                request_id = str(message.get("requestId") or "")
+                if not request_id:
+                    continue
+                message_install_id = str(message.get("installId") or install_id)
+                async with state.lock:
+                    pending = state.pending_control_requests.get(request_id)
+                if pending is None or pending.install_id != message_install_id:
+                    relay_log(
+                        f"Unmatched device.command.result requestId={request_id} installId={message_install_id} expected={install_id}"
+                    )
+                    continue
+                if not pending.future.done():
+                    pending.future.set_result(message)
+    except (WebSocketClosed, asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError) as exc:
+        relay_log(f"Control websocket disconnected installId={install_id or '-'} peer={peer} error={relay_exc_text(exc)}")
     finally:
         async with state.lock:
             if install_id and (record := state.devices.get(install_id)) and record.control_writer is writer:
                 record.control_writer = None
                 record.data["state"] = "offline"
                 record.last_seen = time.time()
+        relay_log(f"Control websocket closed installId={install_id or '-'} peer={peer}")
         writer.close()
         await writer.wait_closed()
 
@@ -949,7 +1233,7 @@ async def handle_browser_ws(state: RelayState, reader: asyncio.StreamReader, wri
 
 async def handle_screen_device_ws(state: RelayState, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, headers: dict[str, str]) -> None:
     peer = writer.get_extra_info("peername")
-    print(f"Screen device websocket from {peer}", flush=True)
+    relay_log(f"Screen device websocket from {peer}")
     writer.write(handshake_response(headers))
     await writer.drain()
     lock = asyncio.Lock()
@@ -961,10 +1245,12 @@ async def handle_screen_device_ws(state: RelayState, reader: asyncio.StreamReade
             return
         attach = json.loads(frame.payload.decode("utf-8"))
         if attach.get("type") != "screen.video.info":
+            relay_log(f"Invalid screen device attach from {peer}: {attach}")
             await send_json(writer, lock, {"type": "error", "error": "invalid screen attach"})
             return
         install_id = str(attach.get("installId") or "")
         if not install_id:
+            relay_log(f"Missing installId for screen device attach from {peer}")
             await send_json(writer, lock, {"type": "error", "error": "missing installId"})
             return
         address = peer[0] if isinstance(peer, tuple) and peer else ""
@@ -992,9 +1278,8 @@ async def handle_screen_device_ws(state: RelayState, reader: asyncio.StreamReade
             record.last_seen = time.time()
             clients_record = record
         await broadcast_screen_clients(clients_record, info)
-        print(
-            f"Screen video attached installId={install_id} codec={info.get('codec')} size={info.get('width')}x{info.get('height')}",
-            flush=True,
+        relay_log(
+            f"Screen video attached installId={install_id} codec={info.get('codec')} size={info.get('width')}x{info.get('height')}"
         )
         while True:
             frame = await read_frame(reader)
@@ -1031,8 +1316,8 @@ async def handle_screen_device_ws(state: RelayState, reader: asyncio.StreamReade
                 record.last_seen = time.time()
                 clients_record = record
             await broadcast_screen_clients(clients_record, frame.payload, opcode=0x2)
-    except (WebSocketClosed, asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
-        pass
+    except (WebSocketClosed, asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError) as exc:
+        relay_log(f"Screen device websocket disconnected installId={install_id or '-'} peer={peer} error={relay_exc_text(exc)}")
     finally:
         async with state.lock:
             if install_id and (record := state.devices.get(install_id)) and record.screen_device_writer is writer:
@@ -1045,6 +1330,7 @@ async def handle_screen_device_ws(state: RelayState, reader: asyncio.StreamReade
                 close_notice = None
         if clients_record is not None and close_notice is not None:
             await broadcast_screen_clients(clients_record, close_notice)
+        relay_log(f"Screen device websocket closed installId={install_id or '-'} peer={peer}")
         writer.close()
         await writer.wait_closed()
 
@@ -1054,6 +1340,7 @@ async def handle_screen_browser_ws(state: RelayState, reader: asyncio.StreamRead
     await writer.drain()
     client = BrowserClient(writer=writer)
     install_id = ""
+    peer = writer.get_extra_info("peername")
     try:
         frame = await read_frame(reader)
         if not frame.is_text:
@@ -1067,6 +1354,7 @@ async def handle_screen_browser_ws(state: RelayState, reader: asyncio.StreamRead
         if not install_id:
             await send_json(writer, client.lock, {"type": "error", "error": "missing installId"})
             return
+        relay_log(f"Screen browser websocket attached installId={install_id} peer={peer}")
         async with state.lock:
             record = state.devices.get(install_id)
             if record is None:
@@ -1138,12 +1426,13 @@ async def handle_screen_browser_ws(state: RelayState, reader: asyncio.StreamRead
                         "error": error,
                     },
                 )
-    except (WebSocketClosed, asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
-        pass
+    except (WebSocketClosed, asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError) as exc:
+        relay_log(f"Screen browser websocket disconnected installId={install_id or '-'} peer={peer} error={relay_exc_text(exc)}")
     finally:
         async with state.lock:
             if install_id and (record := state.devices.get(install_id)):
                 record.screen_clients.discard(client)
+        relay_log(f"Screen browser websocket closed installId={install_id or '-'} peer={peer}")
         writer.close()
         await writer.wait_closed()
 
@@ -1189,6 +1478,12 @@ async def handle_client(state: RelayState, reader: asyncio.StreamReader, writer:
             writer.write(await api_screen_input(state, parse_json_body(body)))
         elif path == "/api/discover" and method.upper() == "POST":
             writer.write(await api_discover(state, parse_json_body(body)))
+        elif path == "/api/server/logs" and method.upper() == "GET":
+            writer.write(await api_server_logs(query))
+        elif path == "/api/browser/log" and method.upper() == "POST":
+            writer.write(await api_browser_log(parse_json_body(body)))
+        elif path == "/api/device/logcat" and method.upper() == "POST":
+            writer.write(await api_device_logcat(state, parse_json_body(body)))
         elif path == "/api/open" and method.upper() == "POST":
             writer.write(await api_open(state, parse_json_body(body)))
         elif path == "/api/close" and method.upper() == "POST":
@@ -1199,6 +1494,7 @@ async def handle_client(state: RelayState, reader: asyncio.StreamReader, writer:
     except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
         pass
     except Exception as exc:  # noqa: BLE001
+        relay_log(f"HTTP handler error: {traceback.format_exc().rstrip()}")
         writer.write(json_response("500 Internal Server Error", {"error": str(exc)}))
         await writer.drain()
     finally:
@@ -1221,14 +1517,14 @@ async def run_server(
     )
     server = await asyncio.start_server(lambda r, w: handle_client(state, r, w), host, port)
     addresses = ", ".join(str(sock.getsockname()) for sock in server.sockets or [])
-    print(f"Mira Relay listening on {addresses}", flush=True)
-    print(f"Open {state.advertise_url}", flush=True)
+    relay_log(f"Mira Relay listening on {addresses}")
+    relay_log(f"Open {state.advertise_url}")
     if is_local_advertise_url(state.advertise_url):
-        print("Android Relay URL pending public tunnel or LAN IP", flush=True)
+        relay_log("Android Relay URL pending public tunnel or LAN IP")
     else:
-        print(f"Android Relay URL {state.advertise_url}", flush=True)
-    print(f"Control WebSocket {state.server_ws_url().replace('/ws/device', '/ws/control')}", flush=True)
-    print(f"Legacy discovery UDP port {discovery_port}", flush=True)
+        relay_log(f"Android Relay URL {state.advertise_url}")
+    relay_log(f"Control WebSocket {state.server_ws_url().replace('/ws/device', '/ws/control')}")
+    relay_log(f"Legacy discovery UDP port {discovery_port}")
     async with server:
         await server.serve_forever()
 

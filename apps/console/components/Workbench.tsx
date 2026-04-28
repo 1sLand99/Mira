@@ -5,12 +5,15 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { DeviceFrame } from '@/components/DeviceFrame';
 import { ConsoleEvent, TerminalStage } from '@/components/TerminalStage';
 import { deviceTitle, shortId } from '@/lib/format';
+import { fetchServerLogs } from '@/lib/relay';
 import type { MiraDevice } from '@/lib/types';
 
 export function Workbench({
   selectedDevice,
   onEvent,
   onRefreshDevices,
+  activePanel,
+  onClosePanel,
 }: {
   devices: MiraDevice[];
   selectedDevice: MiraDevice;
@@ -19,13 +22,62 @@ export function Workbench({
   onBack: () => void;
   onEvent: (event: ConsoleEvent) => void;
   onRefreshDevices: () => void;
+  activePanel: 'server-logs' | null;
+  onClosePanel: () => void;
 }) {
   const hostRef = useRef<HTMLElement | null>(null);
+  const serverLogsCursorRef = useRef(0);
   const [hostSize, setHostSize] = useState({ width: 0, height: 0 });
   const [manualLeftWidth, setManualLeftWidth] = useState<number | null>(null);
   const [infoHeight, setInfoHeight] = useState(168);
+  const [serverLogsText, setServerLogsText] = useState('');
+  const [serverLogsLoading, setServerLogsLoading] = useState(false);
+  const [serverLogsError, setServerLogsError] = useState('');
+  const [serverLogsAt, setServerLogsAt] = useState('');
   const adaptiveLeftWidth = useMemo(() => adaptiveDevicePaneWidth(selectedDevice, hostSize), [hostSize, selectedDevice]);
   const leftWidth = clampPaneSize(manualLeftWidth ?? adaptiveLeftWidth, minDevicePaneWidth(hostSize), maxDevicePaneWidth(hostSize));
+
+  const loadServerLogs = useCallback(
+    async (mode: 'reset' | 'append' = 'append') => {
+      const shouldReset = mode === 'reset';
+      if (shouldReset) {
+        serverLogsCursorRef.current = 0;
+        setServerLogsLoading(true);
+      }
+      setServerLogsError('');
+      try {
+        const response = await fetchServerLogs(serverLogsCursorRef.current, shouldReset ? 300 : 200);
+        serverLogsCursorRef.current = response.nextCursor || serverLogsCursorRef.current;
+        const incoming = response.lines.join('\n').trim();
+        setServerLogsText((current) => {
+          if (!incoming) return shouldReset || response.reset ? '' : current;
+          if (shouldReset || response.reset || !current) return incoming;
+          return `${current}\n${incoming}`.split('\n').slice(-1200).join('\n');
+        });
+        setServerLogsAt(new Date().toLocaleTimeString());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setServerLogsError(message);
+        if (shouldReset) setServerLogsText(message || 'Server log request failed');
+      } finally {
+        if (shouldReset) setServerLogsLoading(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (activePanel !== 'server-logs') return;
+    void loadServerLogs('reset');
+  }, [activePanel, loadServerLogs]);
+
+  useEffect(() => {
+    if (activePanel !== 'server-logs') return;
+    const timer = window.setInterval(() => {
+      void loadServerLogs('append');
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activePanel, loadServerLogs]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -98,7 +150,7 @@ export function Workbench({
   return (
     <section
       ref={hostRef}
-      className="grid min-h-0 flex-1 overflow-hidden bg-[#f5f5f5] text-[#111]"
+      className="relative grid min-h-0 flex-1 overflow-hidden bg-[#f5f5f5] text-[#111]"
       style={{ gridTemplateColumns: `${leftWidth}px 6px minmax(0,1fr)` }}
     >
       <DeviceFrame device={selectedDevice} />
@@ -118,6 +170,15 @@ export function Workbench({
         />
         <InfoPanel device={selectedDevice} />
       </div>
+      <ServerLogsPanel
+        open={activePanel === 'server-logs'}
+        onClose={onClosePanel}
+        text={serverLogsText}
+        loading={serverLogsLoading}
+        error={serverLogsError}
+        updatedAt={serverLogsAt}
+        onRefresh={() => loadServerLogs('reset')}
+      />
     </section>
   );
 }
@@ -156,7 +217,11 @@ function clampPaneSize(value: number, min: number, max: number) {
   return Math.round(Math.max(min, Math.min(value, max)));
 }
 
-function InfoPanel({ device }: { device: MiraDevice }) {
+function InfoPanel({
+  device,
+}: {
+  device: MiraDevice;
+}) {
   const platform = devicePlatform(device);
   const rows: Array<[string, string]> = [];
   addKnownRow(rows, 'Architecture', device.arch);
@@ -396,4 +461,56 @@ function formatBytesPerSecond(value: number) {
   if (value < 1024) return `${value.toFixed(0)}B/s`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}K/s`;
   return `${(value / 1024 / 1024).toFixed(1)}M/s`;
+}
+
+
+function ServerLogsPanel({
+  open,
+  text,
+  loading,
+  error,
+  updatedAt,
+  onRefresh,
+  onClose,
+}: {
+  open: boolean;
+  text: string;
+  loading: boolean;
+  error: string;
+  updatedAt: string;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/25 backdrop-blur-[1px]">
+      <div className="flex h-[min(78vh,560px)] w-[min(84vw,900px)] flex-col overflow-hidden rounded border border-[#cfd9e4] bg-[#fff] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-[#d8d8d8] bg-[#f0f4fb] px-4 py-2">
+          <div className="text-[12px] font-semibold tracking-[0.12em] text-[#3f7fd3]">SERVER LOGS</div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="rounded border border-[#8f8f8f] bg-white px-2 py-0.5 text-[12px] font-semibold text-[#333] transition hover:bg-[#f0f7ff] disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={loading}
+            >
+              {loading ? 'Loading...' : 'Refresh'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded border border-[#8f8f8f] bg-white px-2 py-0.5 text-[12px] text-[#333] transition hover:bg-[#f0f7ff]"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        {updatedAt ? <div className="px-3 py-1.5 text-[12px] text-[#666]">updated {updatedAt}</div> : null}
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-2 text-[12px] text-[#2e2e2e]">
+          {error ? <div className="mb-2 text-[12px] text-[#d85a47]">{error}</div> : null}
+          <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-[#2e2e2e]">{text || 'No server logs yet.'}</pre>
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -134,16 +134,23 @@ public final class MiraControlClient implements Closeable {
     public void sendJson(JSONObject json) {
         if (json == null || outboundExecutor.isShutdown()) return;
         try {
-            outboundExecutor.execute(() -> {
-                try {
-                    MiraWebSocketConnection current = websocket;
-                    if (!running.get() || current == null) return;
-                    current.sendJson(json);
-                } catch (Throwable throwable) {
-                    Log.w(TAG, "Control send failed", throwable);
-                }
-            });
+            outboundExecutor.execute(() -> sendJsonDirect(json, "queued"));
         } catch (RejectedExecutionException ignored) {
+        }
+    }
+
+    public void sendJsonDirect(JSONObject json) {
+        sendJsonDirect(json, "direct");
+    }
+
+    private void sendJsonDirect(JSONObject json, String mode) {
+        if (json == null) return;
+        try {
+            MiraWebSocketConnection current = websocket;
+            if (!running.get() || current == null) return;
+            current.sendJson(json);
+        } catch (Throwable throwable) {
+            Log.w(TAG, "Control send failed mode=" + mode + " type=" + json.optString("type", ""), throwable);
         }
     }
 

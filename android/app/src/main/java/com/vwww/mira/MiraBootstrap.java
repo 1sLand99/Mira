@@ -12,8 +12,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Enumeration;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
  * Mira 最小 bootstrap, 用于创建 APK 私有沙盒里的类 Termux 用户空间骨架。
@@ -25,7 +28,7 @@ public final class MiraBootstrap {
     private static final String MANAGED_MARKER = "# Managed by MiraBootstrap";
     private static final String BOOTSTRAP_PREFIX_ASSET_ROOT = "bootstrap/prefix";
     private static final String INSTALL_STATE_FILE_NAME = ".mira-bootstrap-state";
-    private static final int INSTALL_STATE_VERSION = 3;
+    private static final int INSTALL_STATE_VERSION = 4;
     private static final AtomicBoolean INSTALL_COMPLETED = new AtomicBoolean(false);
     private static final Object INSTALL_LOCK = new Object();
 
@@ -35,6 +38,7 @@ public final class MiraBootstrap {
     private final File tmpDir;
     private final File installStateFile;
     private final AssetManager assets;
+    private final String packageCodePath;
 
     public MiraBootstrap(Context context) {
         Context appContext = context.getApplicationContext();
@@ -44,6 +48,7 @@ public final class MiraBootstrap {
         homeDir = new File(filesDir, "home");
         tmpDir = new File(appContext.getCacheDir(), "tmp");
         installStateFile = new File(filesDir, INSTALL_STATE_FILE_NAME);
+        packageCodePath = appContext.getPackageCodePath();
     }
 
     public void installIfNeeded() throws IOException {
@@ -130,6 +135,7 @@ public final class MiraBootstrap {
             && new File(prefixDir, "bin/frida").isFile()
             && new File(prefixDir, "bin/python3").isFile()
             && new File(prefixDir, "bin/frida-official").isFile()
+            && new File(prefixDir, "lib/python3.13/zipfile/_path/__init__.py").isFile()
             && new File(prefixDir, "etc/profile").isFile()
             && new File(homeDir, ".profile").isFile();
     }
@@ -358,8 +364,30 @@ public final class MiraBootstrap {
             Log.i(TAG, "No packaged bootstrap prefix for current ABI, keeping minimal prefix");
             return;
         }
+        extractBootstrapPrefixFromApk(assetRoot, prefixDir);
         extractAssetTree(assetRoot, prefixDir, "");
         Log.i(TAG, "Installed bootstrap prefix assets from " + assetRoot);
+    }
+
+    private void extractBootstrapPrefixFromApk(String assetRoot, File destinationRoot) throws IOException {
+        String prefix = "assets/" + assetRoot + "/";
+        try (ZipFile zipFile = new ZipFile(packageCodePath)) {
+            Enumeration<? extends ZipEntry> entries = zipFile.entries();
+            boolean extractedAny = false;
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                String name = entry.getName();
+                if (!name.startsWith(prefix) || entry.isDirectory()) continue;
+                String relativePath = name.substring(prefix.length());
+                File targetFile = new File(destinationRoot, relativePath);
+                try (InputStream input = zipFile.getInputStream(entry)) {
+                    copyInputToFile(input, targetFile, relativePath);
+                }
+                extractedAny = true;
+            }
+            if (extractedAny) return;
+        }
+        extractAssetTree(assetRoot, destinationRoot, "");
     }
 
     private String selectBootstrapPrefixAssetRoot() throws IOException {
@@ -391,12 +419,7 @@ public final class MiraBootstrap {
         String[] children = assets.list(assetPath);
         if (children == null || children.length == 0) {
             File targetFile = relativePath.isEmpty() ? destinationRoot : new File(destinationRoot, relativePath);
-            copyAsset(assetPath, targetFile);
-            if (shouldBeExecutable(relativePath)) {
-                if (!targetFile.setReadable(true, true)) throw new IOException("无法设置可读权限: " + targetFile.getAbsolutePath());
-                if (!targetFile.setWritable(true, true)) throw new IOException("无法设置可写权限: " + targetFile.getAbsolutePath());
-                if (!targetFile.setExecutable(true, true)) throw new IOException("无法设置可执行权限: " + targetFile.getAbsolutePath());
-            }
+            copyAsset(assetPath, targetFile, relativePath);
             return;
         }
         File targetDir = relativePath.isEmpty() ? destinationRoot : new File(destinationRoot, relativePath);
@@ -407,15 +430,28 @@ public final class MiraBootstrap {
         }
     }
 
-    private void copyAsset(String assetPath, File destination) throws IOException {
+    private void copyAsset(String assetPath, File destination, String relativePath) throws IOException {
         File parent = destination.getParentFile();
         if (parent != null) mkdir(parent);
-        try (InputStream input = assets.open(assetPath); FileOutputStream output = new FileOutputStream(destination, false)) {
+        try (InputStream input = assets.open(assetPath)) {
+            copyInputToFile(input, destination, relativePath);
+        }
+    }
+
+    private void copyInputToFile(InputStream input, File destination, String relativePath) throws IOException {
+        File parent = destination.getParentFile();
+        if (parent != null) mkdir(parent);
+        try (FileOutputStream output = new FileOutputStream(destination, false)) {
             byte[] buffer = new byte[64 * 1024];
             int read;
             while ((read = input.read(buffer)) != -1) {
                 output.write(buffer, 0, read);
             }
+        }
+        if (shouldBeExecutable(relativePath)) {
+            if (!destination.setReadable(true, true)) throw new IOException("无法设置可读权限: " + destination.getAbsolutePath());
+            if (!destination.setWritable(true, true)) throw new IOException("无法设置可写权限: " + destination.getAbsolutePath());
+            if (!destination.setExecutable(true, true)) throw new IOException("无法设置可执行权限: " + destination.getAbsolutePath());
         }
     }
 

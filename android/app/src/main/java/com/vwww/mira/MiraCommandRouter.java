@@ -20,7 +20,7 @@ import java.util.Set;
 
 final class MiraCommandRouter {
     private static final long DUMPSYS_TIMEOUT_MS = 10_000L;
-    private static final long LOGCAT_TIMEOUT_MS = 8_000L;
+    private static final long LOGCAT_TIMEOUT_MS = 30_000L;
     private static final long GETPROP_TIMEOUT_MS = 5_000L;
     private static final Set<String> DUMPSYS_ALLOWLIST = new HashSet<>(Arrays.asList(
         "activity",

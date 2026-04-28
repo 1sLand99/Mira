@@ -54,7 +54,9 @@ final class MiraControlViewModel: ObservableObject {
             if relayConnected {
                 MiraRemoteServices.shared.resumeForSceneActive()
             }
-        case .inactive, .background:
+        case .inactive:
+            break
+        case .background:
             MiraRemoteServices.shared.pauseForSceneStop()
         @unknown default:
             break

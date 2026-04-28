@@ -3,10 +3,11 @@
 import clsx from 'clsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, CompositionEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactNode } from 'react';
-import { screenVideoWsUrl, sendScreenInput } from '@/lib/relay';
-import type { MiraDevice, ScreenInputKind, ScreenInputResponse, ScreenVideoInfo } from '@/lib/types';
+import { latestScreenFrame, postBrowserLog, screenVideoWsUrl, sendScreenInput } from '@/lib/relay';
+import type { MiraDevice, ScreenFrame, ScreenInputKind, ScreenInputResponse, ScreenVideoInfo } from '@/lib/types';
 
 type LiveStatus = 'connecting' | 'waiting' | 'live' | 'error' | 'unsupported';
+type RenderMode = 'canvas' | 'snapshot';
 
 type VideoPacket = {
   keyFrame: boolean;
@@ -42,6 +43,7 @@ type ScreenInputPayload =
 
 const PACKET_HEADER_BYTES = 20;
 const STALE_MS = 2500;
+const SNAPSHOT_POLL_INTERVAL_MS = 1000;
 const REMOTE_KEY_NAMES = new Set(['Backspace', 'Delete', 'Enter', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
 
 export function LiveScreenViewer({ device, fallback, className }: { device: MiraDevice; fallback: ReactNode; className?: string }) {
@@ -52,15 +54,23 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
   const decoderRef = useRef<any>(null);
   const infoRef = useRef<ScreenVideoInfo | null>(null);
   const retryTimerRef = useRef<number | null>(null);
+  const snapshotTimerRef = useRef<number | null>(null);
+  const snapshotInFlightRef = useRef(false);
+  const lastSnapshotSeqRef = useRef(0);
+  const lastSnapshotUrlRef = useRef('');
   const lastFrameAtRef = useRef(0);
   const waitingForKeyFrameRef = useRef(true);
+  const renderModeRef = useRef<RenderMode>('canvas');
   const composingInputRef = useRef(false);
   const clientIdRef = useRef(`screen-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`);
   const requestSeqRef = useRef(0);
   const pendingInputRequestsRef = useRef(new Set<string>());
+  const logSeqRef = useRef(0);
   const [info, setInfo] = useState<ScreenVideoInfo | null>(null);
   const [status, setStatus] = useState<LiveStatus>('connecting');
-  const [, setError] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [renderMode, setRenderMode] = useState<RenderMode>('canvas');
+  const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [, setInputStatus] = useState('input ready');
@@ -71,6 +81,21 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    renderModeRef.current = renderMode;
+  }, [renderMode]);
+
+  const browserLog = useCallback(
+    (scope: string, message: string, details?: Record<string, unknown>) => {
+      const payload = {
+        seq: ++logSeqRef.current,
+        ...details,
+      };
+      void postBrowserLog(scope, message, device.installId, payload).catch(() => {});
+    },
+    [device.installId],
+  );
 
   const closeDecoder = useCallback(() => {
     const decoder = decoderRef.current;
@@ -83,17 +108,106 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
     }
   }, []);
 
+  const stopSnapshotPolling = useCallback(() => {
+    if (snapshotTimerRef.current !== null) {
+      window.clearInterval(snapshotTimerRef.current);
+      snapshotTimerRef.current = null;
+    }
+  }, []);
+
+  const frameFromScreenFrame = useCallback((frame: ScreenFrame): ScreenVideoInfo => {
+    return {
+      type: 'screen.video.info',
+      protocol: frame.protocol,
+      installId: frame.installId,
+      deviceName: frame.deviceName,
+      codec: frame.format || 'jpeg',
+      width: frame.sourceWidth || frame.width,
+      height: frame.sourceHeight || frame.height,
+      sourceWidth: frame.sourceWidth,
+      sourceHeight: frame.sourceHeight,
+      transport: 'http',
+      receivedAt: typeof frame.receivedAt === 'number' ? frame.receivedAt : frame.receivedAt ? Number(frame.receivedAt) : undefined,
+      format: frame.format,
+    };
+  }, []);
+
+  const loadSnapshotFrame = useCallback(async () => {
+    if (snapshotInFlightRef.current || renderModeRef.current !== 'snapshot') return;
+    snapshotInFlightRef.current = true;
+    try {
+      const frame = await latestScreenFrame(device.installId);
+      if (!frame || !frame.dataBase64) return;
+      const seq = Number(frame.seq) || 0;
+      if (seq !== lastSnapshotSeqRef.current || frame.dataBase64 !== lastSnapshotUrlRef.current) {
+        const nextDataUrl = `data:image/jpeg;base64,${frame.dataBase64}`;
+        setSnapshotUrl(nextDataUrl);
+        lastSnapshotUrlRef.current = frame.dataBase64;
+      }
+      const nextInfo = frameFromScreenFrame(frame);
+      infoRef.current = nextInfo;
+      setInfo(nextInfo);
+      lastSnapshotSeqRef.current = seq;
+      lastFrameAtRef.current = Date.now();
+      setStatus('live');
+      setNow(Date.now());
+      setStreamError(null);
+    } catch (snapshotError) {
+      browserLog('screen.snapshot', 'latestScreenFrame failed', {
+        error: errorMessage(snapshotError),
+      });
+      setStatus((previous) => (previous === 'connecting' ? previous : 'unsupported'));
+      setDebugInfo({
+        title: 'Snapshot fallback failed',
+        message: errorMessage(snapshotError),
+        at: new Date().toLocaleTimeString(),
+      });
+      setShowDebug(true);
+      console.error('Mira screen snapshot fallback failed', snapshotError);
+    } finally {
+      snapshotInFlightRef.current = false;
+    }
+  }, [browserLog, device.installId, frameFromScreenFrame]);
+
+  const startSnapshotPolling = useCallback(() => {
+    stopSnapshotPolling();
+    loadSnapshotFrame();
+    snapshotTimerRef.current = window.setInterval(() => {
+      void loadSnapshotFrame();
+    }, SNAPSHOT_POLL_INTERVAL_MS);
+  }, [loadSnapshotFrame, stopSnapshotPolling]);
+
+  const switchToSnapshotMode = useCallback(() => {
+    if (renderModeRef.current === 'snapshot') return;
+    browserLog('screen.decoder', 'switchToSnapshotMode', {
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      hasVideoDecoder: typeof (window as unknown as { VideoDecoder?: unknown }).VideoDecoder !== 'undefined',
+      hasEncodedVideoChunk: typeof (window as unknown as { EncodedVideoChunk?: unknown }).EncodedVideoChunk !== 'undefined',
+    });
+    closeDecoder();
+    setRenderMode('snapshot');
+    setStatus('unsupported');
+    setStreamError(null);
+    setShowDebug(false);
+    startSnapshotPolling();
+    setDebugInfo({
+      title: 'WebCodecs unavailable',
+      message: 'This browser cannot decode H.264 via WebCodecs. Fallback to JPEG snapshot is running.',
+      at: new Date().toLocaleTimeString(),
+    });
+  }, [browserLog, closeDecoder, startSnapshotPolling]);
+
   const configureDecoder = useCallback(
     async (nextInfo: ScreenVideoInfo) => {
       const VideoDecoderCtor = (window as unknown as { VideoDecoder?: any }).VideoDecoder;
       if (!VideoDecoderCtor || typeof (window as unknown as { EncodedVideoChunk?: unknown }).EncodedVideoChunk === 'undefined') {
-        setStatus('unsupported');
-        setError('WebCodecs unavailable');
-        setDebugInfo({
-          title: 'WebCodecs unavailable',
-          message: 'This browser does not provide VideoDecoder or EncodedVideoChunk, so H.264 cannot be decoded.',
-          at: new Date().toLocaleTimeString(),
+        browserLog('screen.decoder', 'webcodecs unavailable', {
+          hasVideoDecoder: Boolean(VideoDecoderCtor),
+          hasEncodedVideoChunk: typeof (window as unknown as { EncodedVideoChunk?: unknown }).EncodedVideoChunk !== 'undefined',
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
         });
+        setStatus('unsupported');
+        switchToSnapshotMode();
         return;
       }
       const width = Number(nextInfo.width) || 0;
@@ -124,7 +238,7 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
           const message = errorMessage(decodeError);
           console.error('Mira screen decoder error', decodeError, infoRef.current);
           setStatus('error');
-          setError(message);
+          setStreamError(message);
           setDebugInfo({
             title: 'Decoder error',
             message,
@@ -146,9 +260,16 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
         hardwareAcceleration: 'prefer-hardware',
       };
       const support = typeof VideoDecoderCtor.isConfigSupported === 'function' ? await VideoDecoderCtor.isConfigSupported(config).catch(() => null) : null;
+      browserLog('screen.decoder', 'decoder support checked', {
+        codec: config.codec,
+        width,
+        height,
+        support,
+      });
       if (support && support.supported === false) {
         setStatus('unsupported');
-        setError(`decoder unsupported: ${config.codec}`);
+        setStreamError(`decoder unsupported: ${config.codec}`);
+        switchToSnapshotMode();
         console.error('Mira screen decoder unsupported', config, support);
         setDebugInfo({
           title: 'Decoder unsupported',
@@ -161,11 +282,14 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
         setShowDebug(true);
         return;
       }
+      setRenderMode('canvas');
+      stopSnapshotPolling();
+      setSnapshotUrl(null);
       console.info('Mira screen decoder configure', config, support);
       decoder.configure(config);
       decoderRef.current = decoder;
     },
-    [closeDecoder],
+    [browserLog, closeDecoder, stopSnapshotPolling, switchToSnapshotMode],
   );
 
   const handleInputResult = useCallback((message: Partial<ScreenInputResponse> & { type?: string }) => {
@@ -265,6 +389,10 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
   }, []);
 
   const connect = useCallback(() => {
+    browserLog('screen.ws', 'connect invoked', {
+      renderMode: renderModeRef.current,
+      wsUrl: screenVideoWsUrl(),
+    });
     if (retryTimerRef.current !== null) {
       window.clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
@@ -272,10 +400,15 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
     const oldSocket = socketRef.current;
     if (oldSocket) oldSocket.close();
     closeDecoder();
+    stopSnapshotPolling();
     infoRef.current = null;
     setInfo(null);
+    setRenderMode('canvas');
+    setSnapshotUrl(null);
+    lastSnapshotSeqRef.current = 0;
+    lastSnapshotUrlRef.current = '';
     setStatus('connecting');
-    setError(null);
+    setStreamError(null);
     setDebugInfo(null);
     setShowDebug(false);
     setLastSeq(0);
@@ -287,6 +420,7 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
     socketRef.current = socket;
 
     socket.addEventListener('open', () => {
+      browserLog('screen.ws', 'socket open');
       setStatus('waiting');
       socket.send(JSON.stringify({ type: 'screen.browser.attach', protocol: 1, installId: device.installId }));
     });
@@ -299,11 +433,23 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
           return;
         }
         if (message.type === 'screen.video.info') {
+          browserLog('screen.ws', 'screen.video.info', {
+            codec: message.codec,
+            width: message.width,
+            height: message.height,
+            format: message.format,
+          });
           infoRef.current = message;
           setInfo(message);
           setStatus('waiting');
-          setError(null);
+          setStreamError(null);
           setDebugInfo(null);
+          const VideoDecoderCtor = (window as unknown as { VideoDecoder?: any }).VideoDecoder;
+          if (!VideoDecoderCtor) {
+            setStatus('unsupported');
+            switchToSnapshotMode();
+            return;
+          }
           void configureDecoder(message);
         } else if (message.type === 'screen.video.waiting') {
           setStatus('waiting');
@@ -313,8 +459,11 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
         } else if (message.type === 'screen.input.result' || message.type === 'screen.input.queued') {
           handleInputResult(message);
         } else if (message.type === 'error') {
+          browserLog('screen.ws', 'socket error message', {
+            error: message.error,
+          });
           setStatus('error');
-          setError(message.error || 'screen relay error');
+          setStreamError(message.error || 'screen relay error');
         }
         return;
       }
@@ -333,6 +482,11 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
         decoder.decode(chunk);
         setLastSeq(packet.seq);
       } catch (decodeError) {
+        browserLog('screen.decoder', 'decode enqueue failed', {
+          error: errorMessage(decodeError),
+          seq: packet.seq,
+          codec: infoRef.current?.codec,
+        });
         waitingForKeyFrameRef.current = true;
         const message = errorMessage(decodeError);
         const packetHead = Array.from(packet.data.slice(0, 32)).map((value) => value.toString(16).padStart(2, '0')).join(' ');
@@ -345,7 +499,7 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
           info: infoRef.current,
         });
         setStatus('error');
-        setError(message);
+        setStreamError(message);
         setDebugInfo({
           title: 'Decode enqueue failed',
           message,
@@ -364,27 +518,36 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
       }
     });
     socket.addEventListener('close', () => {
+      browserLog('screen.ws', 'socket close', {
+        activeSocket: socketRef.current === socket,
+        renderMode: renderModeRef.current,
+      });
       if (socketRef.current !== socket) return;
       setStatus('waiting');
       closeDecoder();
+      if (renderModeRef.current === 'snapshot') startSnapshotPolling();
       retryTimerRef.current = window.setTimeout(connect, 1000);
     });
     socket.addEventListener('error', () => {
+      browserLog('screen.ws', 'socket error event');
       setStatus('error');
-      setError('screen websocket error');
+      setStreamError('screen websocket error');
     });
-  }, [closeDecoder, configureDecoder, device.installId, handleInputResult]);
+  }, [browserLog, closeDecoder, configureDecoder, device.installId, handleInputResult, startSnapshotPolling, stopSnapshotPolling, switchToSnapshotMode]);
 
   useEffect(() => {
+    browserLog('screen.lifecycle', 'effect mount');
     connect();
     return () => {
+      browserLog('screen.lifecycle', 'effect cleanup');
       if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
       const socket = socketRef.current;
       socketRef.current = null;
       if (socket) socket.close();
       closeDecoder();
+      stopSnapshotPolling();
     };
-  }, [closeDecoder, connect]);
+  }, [closeDecoder, connect, stopSnapshotPolling]);
 
   const handleClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -544,8 +707,27 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
 
   const lastFrameAge = lastFrameAtRef.current ? now - lastFrameAtRef.current : 0;
   const stale = status === 'live' && lastFrameAge > STALE_MS;
-  const showCanvas = Boolean(info && status === 'live');
-  const showInactiveOverlay = !showCanvas || stale || status !== 'live';
+  const showCanvas = renderMode === 'canvas' && Boolean(info && status === 'live');
+  const showSnapshot = renderMode === 'snapshot' && Boolean(snapshotUrl);
+  const showInactiveOverlay = status === 'connecting' || status === 'error' || status === 'unsupported' || (!showCanvas && !showSnapshot) || stale;
+  const overlayDisplayText = (() => {
+    if (status === 'unsupported' || renderMode === 'snapshot') {
+      return 'WebCodecs unavailable, fallback to JPEG snapshot';
+    }
+    if (status === 'error') {
+      return streamError || 'screen relay error';
+    }
+    if (status === 'connecting') {
+      return 'Connecting to device screen stream';
+    }
+    if (status === 'waiting') {
+      return 'Waiting for screen stream frames';
+    }
+    if (stale) {
+      return `No frame update within ${lastFrameAge}ms, reconnecting`;
+    }
+    return 'Device is not in foreground';
+  })();
 
   return (
     <div
@@ -573,10 +755,17 @@ export function LiveScreenViewer({ device, fallback, className }: { device: Mira
         onPaste={handleInputTrapPaste}
       />
       <div className={clsx('absolute inset-0', showCanvas && 'hidden')}>{fallback}</div>
+      {renderMode === 'snapshot' ? (
+        <img
+          src={snapshotUrl || ''}
+          alt="Remote screen snapshot"
+          className={clsx('absolute inset-0 h-full w-full object-contain', !showSnapshot && 'hidden')}
+        />
+      ) : null}
       <canvas ref={canvasRef} className={clsx('absolute inset-0 h-full w-full object-contain', !showCanvas && 'opacity-0')} />
       {showInactiveOverlay ? (
         <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-[#777]/85 p-6 text-center font-mono text-white">
-          <div className="text-[13px] font-semibold tracking-[0.08em]">Device is not in foreground</div>
+          <div className="text-[13px] font-semibold tracking-[0.08em]">{overlayDisplayText}</div>
         </div>
       ) : null}
       {debugInfo ? (

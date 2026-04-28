@@ -1,4 +1,12 @@
-import type { DevicesResponse, OpenSessionResponse, ScreenFrame, ScreenFrameMetadata, ScreenInputRequest, ScreenInputResponse } from './types';
+import type {
+  DevicesResponse,
+  OpenSessionResponse,
+  ScreenFrame,
+  ScreenFrameMetadata,
+  ScreenInputRequest,
+  ScreenInputResponse,
+  ServerLogsResponse,
+} from './types';
 
 const RELAY_ORIGIN = process.env.NEXT_PUBLIC_RELAY_ORIGIN?.replace(/\/$/, '') || '';
 const RELAY_WS = process.env.NEXT_PUBLIC_RELAY_WS?.replace(/\/$/, '') || '';
@@ -89,6 +97,19 @@ export function sendScreenTap(installId: string, x: number, y: number): Promise<
     kind: 'tap',
     x,
     y,
+  });
+}
+
+export function fetchServerLogs(cursor = 0, limit = 300): Promise<ServerLogsResponse> {
+  return request<ServerLogsResponse>(`/api/server/logs?cursor=${encodeURIComponent(String(cursor))}&limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function postBrowserLog(scope: string, message: string, installId: string, details?: unknown): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/api/browser/log', {
+    scope,
+    message,
+    installId,
+    details,
   });
 }
 

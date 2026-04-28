@@ -159,6 +159,19 @@ export type ScreenInputResponse = {
   text?: string;
 };
 
+export type ServerLogEntry = {
+  cursor: number;
+  at: number;
+  line: string;
+};
+
+export type ServerLogsResponse = {
+  entries: ServerLogEntry[];
+  lines: string[];
+  nextCursor: number;
+  reset: boolean;
+};
+
 export type DeviceMetrics = {
   sampledAt?: number;
   cpuPercent?: number;
