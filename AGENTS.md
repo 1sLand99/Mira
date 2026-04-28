@@ -34,3 +34,16 @@ IDB_MIRA_RELAY_URL="http://<host-ip>:8765" \
 IDB_MIRA_AUTO_CONNECT=1 \
 idb launch --udid <device-udid> com.vwww.mira.ios
 ```
+
+## Android automation baseline
+
+1. Android 自动化入口固定使用 `<path-to-mira-repo>/mira-android`.
+2. 默认链路是 build -> adb install -r -> am start.
+3. Relay URL 通过 Activity extras 注入, 不走手工输入 UI.
+4. 当前约定的 extras 是 `mira_relay_url` 和 `mira_auto_connect`.
+5. 当前已验证可工作的自动化示例:
+
+```bash
+MIRA_ANDROID_RELAY_URL="http://<host-ip>:8765" \
+<path-to-mira-repo>/mira-android
+```

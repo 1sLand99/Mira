@@ -38,6 +38,15 @@ adb install -r android/app/build/outputs/apk/debug/mira-app-debug.apk
 adb shell am start -n com.vwww.mira/.MainActivity
 ```
 
+如果要跑 Android 自动化链路, 可以直接使用:
+
+```bash
+MIRA_ANDROID_RELAY_URL="http://<host-ip>:8765" \
+./mira-android
+```
+
+脚本会自动完成 build, adb install, 启动 App, 注入 Relay URL, 并自动触发连接.
+
 Android shell 的默认路径和工作目录是:
 
 ```text

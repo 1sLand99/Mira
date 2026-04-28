@@ -23,11 +23,14 @@ import java.util.Locale;
 public final class MainActivity extends Activity {
     private static final String PREFS = "mira_ui";
     private static final String KEY_RELAY_URL = "relay_url";
+    public static final String EXTRA_RELAY_URL = "mira_relay_url";
+    public static final String EXTRA_AUTO_CONNECT = "mira_auto_connect";
 
     private MiraIdentity identity;
     private EditText relayUrlInput;
     private TextView statusText;
     private boolean receiverRegistered;
+    private boolean didRunStartupAutomation;
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -41,9 +44,17 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         identity = new MiraIdentity(this);
         showControlPage();
+        applyLaunchIntent(getIntent());
         MiraOutlineCollector.getInstance().register(this);
         MiraSelfScreenCapture.getInstance().register(this);
         requestOutlineUploadSoon();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        applyLaunchIntent(intent);
     }
 
     @Override
@@ -145,6 +156,26 @@ public final class MainActivity extends Activity {
         setContentView(scrollView);
         MiraOutlineCollector.getInstance().register(this);
         MiraSelfScreenCapture.getInstance().register(this);
+    }
+
+    private void applyLaunchIntent(Intent intent) {
+        if (intent == null) return;
+        String launchRelayUrl = intent.getStringExtra(EXTRA_RELAY_URL);
+        if (launchRelayUrl != null) {
+            String normalized = launchRelayUrl.trim();
+            if (!normalized.isEmpty()) {
+                if (relayUrlInput != null) relayUrlInput.setText(normalized);
+                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(KEY_RELAY_URL, normalized)
+                    .apply();
+            }
+        }
+
+        boolean shouldAutoConnect = intent.getBooleanExtra(EXTRA_AUTO_CONNECT, false);
+        if (shouldAutoConnect && !didRunStartupAutomation) {
+            didRunStartupAutomation = true;
+            if (relayUrlInput != null) relayUrlInput.post(this::connectRelay);
+        }
     }
 
     private View spacer() {
