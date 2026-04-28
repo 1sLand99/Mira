@@ -63,6 +63,21 @@ open ios/Mira/Mira.xcodeproj
 
 iOS 侧已经接入 Relay, PTY, Mira App 自身 key window 画面上传, 设备指标采样, `/mira` app-view root 和 `/mira/proc` simulated process view(模拟进程视图). 详细说明见 `IOS-APP.md`.
 
+如果要跑真机自动化链路, 推荐安装 `idb-companion` 与 `fb-idb`, 再通过环境变量把 Relay URL 注入到 App 启动环境:
+
+```bash
+MIRA_IOS_AUTO_LAUNCH_DEVICE=1 \
+MIRA_IOS_RELAY_URL="http://<电脑局域网IP>:8765" \
+./mira-ios --device
+```
+
+当 `idb` 可用时, 真机启动会优先走 `idb launch`, App 会读取:
+
+1. `MIRA_RELAY_URL`
+2. `MIRA_AUTO_CONNECT`
+
+从而在真机上自动填入并连接 Relay.
+
 ## 4. 连接移动端
 
 1. 打开 Android 或 iOS 端 Mira App 首页.

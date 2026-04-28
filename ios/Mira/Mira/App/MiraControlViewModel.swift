@@ -3,6 +3,11 @@ import SwiftUI
 
 @MainActor
 final class MiraControlViewModel: ObservableObject {
+    private enum LaunchEnv {
+        static let relayURL = "MIRA_RELAY_URL"
+        static let autoConnect = "MIRA_AUTO_CONNECT"
+    }
+
     private enum DefaultsKey {
         static let relayURL = "relay_url"
     }
@@ -16,10 +21,26 @@ final class MiraControlViewModel: ObservableObject {
     @Published private(set) var statusText: String = "disconnected"
     private var statusTimer: Timer?
     private var relayConnected = false
+    private var didRunStartupAutomation = false
 
     init() {
-        relayURL = UserDefaults.standard.string(forKey: DefaultsKey.relayURL) ?? ""
+        let launchRelayURL = ProcessInfo.processInfo.environment[LaunchEnv.relayURL]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        relayURL = launchRelayURL.isEmpty ? (UserDefaults.standard.string(forKey: DefaultsKey.relayURL) ?? "") : launchRelayURL
         refreshNativeStatus()
+    }
+
+    func performStartupAutomationIfNeeded() {
+        guard !didRunStartupAutomation else { return }
+        didRunStartupAutomation = true
+
+        let environment = ProcessInfo.processInfo.environment
+        let shouldAutoConnect = (environment[LaunchEnv.autoConnect] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard ["1", "true", "yes", "on"].contains(shouldAutoConnect) else { return }
+        guard !relayURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            statusText = "relay url required"
+            return
+        }
+        connectRelay()
     }
 
     func connectRelay() {

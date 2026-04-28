@@ -19,6 +19,9 @@ struct ContentView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Color(.systemBackground))
+        .task {
+            viewModel.performStartupAutomationIfNeeded()
+        }
     }
 
     private var titleRow: some View {

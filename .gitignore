@@ -6,6 +6,7 @@
 node_modules/
 dist/
 build/
+idb-applications/
 apps/console/.next/
 apps/console/out/
 

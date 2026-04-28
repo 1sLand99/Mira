@@ -84,6 +84,41 @@ MIRA_IOS_SCHEME="Mira" ./mira-ios
 MIRA_IOS_BUNDLE_ID="com.vwww.mira.ios" ./mira-ios
 ```
 
+### 真机自动化链路
+
+如果要把真机链路做成完全自动化, 推荐把 `idb` 作为依赖:
+
+1. 安装 `idb-companion` 和 `fb-idb`。
+2. 使用 `./mira-ios --device` 做 build 和 install。
+3. 通过 `idb launch` 启动 App, 并把 Relay URL 通过环境变量注入到 App 启动环境。
+
+官方安装文档:
+
+- [idb Installation](https://fbidb.io/docs/installation/)
+- [idb Commands](https://fbidb.io/docs/commands/)
+
+Mira iOS App 支持读取以下启动环境变量:
+
+1. `MIRA_RELAY_URL`: 启动后写入首页 Relay URL 输入框对应状态。
+2. `MIRA_AUTO_CONNECT`: 为 `1` 时, App 启动后自动执行 `Connect Relay`。
+
+配合 `idb` 的自动化示例:
+
+```bash
+idb connect <device-udid>
+IDB_MIRA_RELAY_URL="http://<电脑局域网IP>:8765" \
+IDB_MIRA_AUTO_CONNECT=1 \
+idb --udid <device-udid> launch com.vwww.mira.ios
+```
+
+如果直接使用仓库脚本, 可开启真机自动启动并注入 Relay URL:
+
+```bash
+MIRA_IOS_AUTO_LAUNCH_DEVICE=1 \
+MIRA_IOS_RELAY_URL="http://<电脑局域网IP>:8765" \
+./mira-ios --device
+```
+
 ## Relay 联调路径
 
 1. 启动 Mira relay 服务端。

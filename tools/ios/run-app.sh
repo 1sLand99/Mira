@@ -7,6 +7,8 @@ SCHEME="${MIRA_IOS_SCHEME:-Mira}"
 DEVICE_NAME="${MIRA_IOS_DEVICE:-iPhone 17 Pro}"
 TARGET="${MIRA_IOS_TARGET:-auto}"
 BUNDLE_ID="${MIRA_IOS_BUNDLE_ID:-com.vwww.mira.ios}"
+AUTO_LAUNCH_DEVICE="${MIRA_IOS_AUTO_LAUNCH_DEVICE:-0}"
+AUTO_CONNECT_RELAY_URL="${MIRA_IOS_RELAY_URL:-}"
 SIM_DERIVED_DATA="${MIRA_IOS_SIM_DERIVED_DATA:-${ROOT_DIR}/build/ios/DerivedData}"
 SIM_APP_PATH="${SIM_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/Mira.app"
 DEVICE_DERIVED_DATA="${MIRA_IOS_DEVICE_DERIVED_DATA:-${ROOT_DIR}/build/ios-mira-device-native-relay-derived}"
@@ -26,6 +28,8 @@ Environment variables:
   MIRA_IOS_TARGET       auto, device, or simulator. Default auto
   MIRA_IOS_DEVICE_ID    physical device UDID. If empty, first USB device from ios-deploy is used
   MIRA_IOS_DEPLOY       ios-deploy executable path. Default local build/ios-tools, then PATH
+  MIRA_IOS_AUTO_LAUNCH_DEVICE  1 to auto launch after physical-device install. Default 0
+  MIRA_IOS_RELAY_URL    Relay URL to inject at launch time for automated connect
   MIRA_IOS_DEVICE       Simulator device name. Default iPhone 17 Pro
   MIRA_IOS_SCHEME       Xcode scheme. Default Mira
   MIRA_IOS_BUNDLE_ID    Bundle identifier. Default com.vwww.mira.ios
@@ -157,6 +161,11 @@ install_device_app() {
   local output
   local status
 
+  if has_idb; then
+    install_device_app_with_idb "${device_id}" "${app_path}"
+    return 0
+  fi
+
   set +e
   output="$("${ios_deploy}" \
     --id "${device_id}" \
@@ -189,11 +198,71 @@ install_device_app() {
   return "${status}"
 }
 
+ensure_idb() {
+  local user_base
+  if command -v idb >/dev/null 2>&1; then
+    command -v idb
+    return
+  fi
+
+  user_base="$(python3 -m site --user-base 2>/dev/null || true)"
+  if [[ -n "${user_base}" && -x "${user_base}/bin/idb" ]]; then
+    printf '%s\n' "${user_base}/bin/idb"
+    return
+  fi
+
+  echo "idb not found. Install fb-idb client and idb-companion first." >&2
+  echo "Docs: https://fbidb.io/docs/installation/" >&2
+  exit 1
+}
+
+has_idb() {
+  command -v idb >/dev/null 2>&1 || [[ -x "$(python3 -m site --user-base 2>/dev/null || true)/bin/idb" ]]
+}
+
+connect_idb_target() {
+  local idb_bin="$1"
+  local device_id="$2"
+  "${idb_bin}" connect "${device_id}" >/dev/null
+}
+
+install_device_app_with_idb() {
+  local device_id="$1"
+  local app_path="$2"
+  local idb_bin
+
+  idb_bin="$(ensure_idb)"
+  connect_idb_target "${idb_bin}" "${device_id}"
+  "${idb_bin}" install --udid "${device_id}" "${app_path}"
+}
+
+launch_device_app_with_idb() {
+  local device_id="$1"
+  local bundle_id="$2"
+  local relay_url="$3"
+  local idb_bin
+
+  idb_bin="$(ensure_idb)"
+  connect_idb_target "${idb_bin}" "${device_id}"
+  if [[ -n "${relay_url}" ]]; then
+    IDB_MIRA_RELAY_URL="${relay_url}" IDB_MIRA_AUTO_CONNECT=1 "${idb_bin}" launch --udid "${device_id}" "${bundle_id}"
+  else
+    "${idb_bin}" launch --udid "${device_id}" "${bundle_id}"
+  fi
+}
+
 launch_device_app() {
   local ios_deploy="$1"
   local device_id="$2"
   local app_path="$3"
   local bundle_id="$4"
+  local relay_url="$5"
+
+  if has_idb; then
+    launch_device_app_with_idb "${device_id}" "${bundle_id}" "${relay_url}"
+    return 0
+  fi
+
   local output
   local status
 
@@ -210,8 +279,8 @@ launch_device_app() {
     --id "${device_id}" \
     --bundle "${app_path}" \
     --noinstall \
-    --debug \
     --justlaunch \
+    --noninteractive \
     --faster-path-search 2>&1)"
   status=$?
   set -e
@@ -263,16 +332,22 @@ run_device() {
   echo "Installing Mira app with ios-deploy ..."
   install_device_app "${ios_deploy}" "${device_id}" "${DEVICE_APP_PATH}" "${BUNDLE_ID}"
 
-  echo "Restarting Mira app ..."
-  launch_device_app "${ios_deploy}" "${device_id}" "${DEVICE_APP_PATH}" "${BUNDLE_ID}"
+  if [[ "${AUTO_LAUNCH_DEVICE}" == "1" ]]; then
+    echo "Restarting Mira app ..."
+    launch_device_app "${ios_deploy}" "${device_id}" "${DEVICE_APP_PATH}" "${BUNDLE_ID}" "${AUTO_CONNECT_RELAY_URL}"
+    launch_note="Auto launch attempted."
+  else
+    launch_note="Auto launch skipped on physical device by default. Open Mira manually, or set MIRA_IOS_AUTO_LAUNCH_DEVICE=1. If idb is installed, MIRA_IOS_RELAY_URL can be injected for auto connect."
+  fi
 
   cat <<MSG
 
-Mira iOS app installed and restarted on device.
+Mira iOS app installed on device.
 Project: ${PROJECT_PATH}
 Device ID: ${device_id}
 Bundle: ${BUNDLE_ID}
 App: ${DEVICE_APP_PATH}
+Note: ${launch_note}
 
 MSG
 }
