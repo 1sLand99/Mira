@@ -9,7 +9,7 @@
 ## Current
 
 1. `REMOTE-RELAY.md`: Relay 和远程按需终端说明.
-2. `MCP.md`: MCP server 配置和工具说明.
+2. `MCP.md`: MCP server 说明, 以及 Claude Desktop / Codex 的实际接入配置.
 3. `IOS-APP.md`: iOS App 架构和运行说明.
 4. `NATIVE-ARCHITECTURE.md`: Android 和 iOS 共享原生 PTY 架构.
 5. `TOOLBOX.md`: Android 内置工具箱说明.

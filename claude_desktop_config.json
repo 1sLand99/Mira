@@ -8,7 +8,10 @@
         "--relay",
         "http://127.0.0.1:8765"
       ],
-      "cwd": "/Users/vw2x/Projects/Reverses/Mira"
+      "cwd": "<path-to-mira-repo>",
+      "env": {
+        "PYTHONPATH": "<path-to-mira-repo>"
+      }
     }
   }
 }

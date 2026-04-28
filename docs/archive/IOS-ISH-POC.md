@@ -36,8 +36,8 @@ third_party/ish/deps/libapps
 新增 Mira shell(命令解释器) 抽象层:
 
 ```text
-/Users/vw2x/Projects/Reverses/Mira/native/include/mira/shell.h
-/Users/vw2x/Projects/Reverses/Mira/native/src/shell/shell_core.c
+<path-to-mira-repo>/native/include/mira/shell.h
+<path-to-mira-repo>/native/src/shell/shell_core.c
 ```
 
 当前行为:
@@ -51,19 +51,19 @@ third_party/ish/deps/libapps
 新增脚本:
 
 ```bash
-/Users/vw2x/Projects/Reverses/Mira/tools/ios/build-ish-libs.sh
+<path-to-mira-repo>/tools/ios/build-ish-libs.sh
 ```
 
 默认构建 iPhoneSimulator(iOS 模拟器平台) 的 arm64(ARM 64 位架构) 版本:
 
 ```bash
-/Users/vw2x/Projects/Reverses/Mira/tools/ios/build-ish-libs.sh
+<path-to-mira-repo>/tools/ios/build-ish-libs.sh
 ```
 
 输出目录:
 
 ```text
-/Users/vw2x/Projects/Reverses/Mira/build/ios-ish-libs/Debug-ApplePleaseFixFB19282108-iphonesimulator/meson/
+<path-to-mira-repo>/build/ios-ish-libs/Debug-ApplePleaseFixFB19282108-iphonesimulator/meson/
 ```
 
 关键产物:
@@ -82,7 +82,7 @@ libfakefs.a
 
 ```bash
 MIRA_ISH_BUILD_DIR=/tmp/mira-ish-target-build \
-  /Users/vw2x/Projects/Reverses/Mira/tools/ios/build-ish-libs.sh
+  <path-to-mira-repo>/tools/ios/build-ish-libs.sh
 ```
 
 成功产物:
@@ -117,12 +117,12 @@ iPhone 17 Pro, UDID 2260242F-07BC-4946-95FB-1204D87F29BA
 
 ```bash
 env -u LIBRARY_PATH -u SDKROOT xcodebuild \
-  -project /Users/vw2x/Projects/Reverses/Mira/ios/Mira/Mira.xcodeproj \
+  -project <path-to-mira-repo>/ios/Mira/Mira.xcodeproj \
   -scheme Mira \
   -configuration Debug \
   -sdk iphonesimulator \
   -destination 'id=2260242F-07BC-4946-95FB-1204D87F29BA' \
-  -derivedDataPath /Users/vw2x/Projects/Reverses/Mira/build/ios-mira-derived-cleanenv \
+  -derivedDataPath <path-to-mira-repo>/build/ios-mira-derived-cleanenv \
   build
 ```
 
@@ -135,7 +135,7 @@ env -u LIBRARY_PATH -u SDKROOT xcodebuild \
 并已安装启动:
 
 ```bash
-xcrun simctl install 2260242F-07BC-4946-95FB-1204D87F29BA /Users/vw2x/Projects/Reverses/Mira/build/ios-mira-derived-cleanenv/Build/Products/Debug-iphonesimulator/Mira.app
+xcrun simctl install 2260242F-07BC-4946-95FB-1204D87F29BA <path-to-mira-repo>/build/ios-mira-derived-cleanenv/Build/Products/Debug-iphonesimulator/Mira.app
 xcrun simctl launch 2260242F-07BC-4946-95FB-1204D87F29BA com.vwww.mira.ios
 ```
 
@@ -164,12 +164,12 @@ unsigned build(不签名构建) 验证命令:
 
 ```bash
 env -u LIBRARY_PATH -u SDKROOT xcodebuild \
-  -project /Users/vw2x/Projects/Reverses/Mira/ios/Mira/Mira.xcodeproj \
+  -project <path-to-mira-repo>/ios/Mira/Mira.xcodeproj \
   -scheme Mira \
   -configuration Debug \
   -sdk iphoneos \
   -destination 'generic/platform=iOS' \
-  -derivedDataPath /Users/vw2x/Projects/Reverses/Mira/build/ios-mira-device-unsigned-derived \
+  -derivedDataPath <path-to-mira-repo>/build/ios-mira-device-unsigned-derived \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
@@ -190,12 +190,12 @@ Signing for "Mira" requires a development team.
 
 ```bash
 env -u LIBRARY_PATH -u SDKROOT xcodebuild \
-  -project /Users/vw2x/Projects/Reverses/Mira/ios/Mira/Mira.xcodeproj \
+  -project <path-to-mira-repo>/ios/Mira/Mira.xcodeproj \
   -scheme Mira \
   -configuration Debug \
   -sdk iphoneos \
   -destination 'generic/platform=iOS' \
-  -derivedDataPath /Users/vw2x/Projects/Reverses/Mira/build/ios-mira-device-signed-derived \
+  -derivedDataPath <path-to-mira-repo>/build/ios-mira-device-signed-derived \
   build
 ```
 
@@ -208,7 +208,7 @@ env -u LIBRARY_PATH -u SDKROOT xcodebuild \
 签名产物:
 
 ```text
-/Users/vw2x/Projects/Reverses/Mira/build/ios-mira-device-signed-derived/Build/Products/Debug-iphoneos/Mira.app
+<path-to-mira-repo>/build/ios-mira-device-signed-derived/Build/Products/Debug-iphoneos/Mira.app
 ```
 
 当前真机 install(安装) 阻塞在 Developer Mode(开发者模式) 未启用。`xcdevice` 显示:
@@ -230,16 +230,16 @@ iSH 真机静态库已验证:
 ```bash
 MIRA_ISH_SDK=iphoneos \
 MIRA_ISH_ARCHS=arm64 \
-MIRA_ISH_BUILD_DIR=/Users/vw2x/Projects/Reverses/Mira/build/ios-ish-device-libs \
-  /Users/vw2x/Projects/Reverses/Mira/tools/ios/build-ish-libs.sh
+MIRA_ISH_BUILD_DIR=<path-to-mira-repo>/build/ios-ish-device-libs \
+  <path-to-mira-repo>/tools/ios/build-ish-libs.sh
 ```
 
 成功产物:
 
 ```text
-/Users/vw2x/Projects/Reverses/Mira/build/ios-ish-device-libs/Debug-ApplePleaseFixFB19282108-iphoneos/meson/libish.a
-/Users/vw2x/Projects/Reverses/Mira/build/ios-ish-device-libs/Debug-ApplePleaseFixFB19282108-iphoneos/meson/libish_emu.a
-/Users/vw2x/Projects/Reverses/Mira/build/ios-ish-device-libs/Debug-ApplePleaseFixFB19282108-iphoneos/meson/libfakefs.a
+<path-to-mira-repo>/build/ios-ish-device-libs/Debug-ApplePleaseFixFB19282108-iphoneos/meson/libish.a
+<path-to-mira-repo>/build/ios-ish-device-libs/Debug-ApplePleaseFixFB19282108-iphoneos/meson/libish_emu.a
+<path-to-mira-repo>/build/ios-ish-device-libs/Debug-ApplePleaseFixFB19282108-iphoneos/meson/libfakefs.a
 ```
 
 ## 下一步
@@ -247,7 +247,7 @@ MIRA_ISH_BUILD_DIR=/Users/vw2x/Projects/Reverses/Mira/build/ios-ish-device-libs 
 下一步要做的是 Mira 自己的 iSH session(会话) 包装层:
 
 ```text
-/Users/vw2x/Projects/Reverses/Mira/native/src/ios/ish_backend/
+<path-to-mira-repo>/native/src/ios/ish_backend/
 ```
 
 已落地的 C API:
@@ -285,12 +285,12 @@ session.close
 
 ```bash
 env -u LIBRARY_PATH -u SDKROOT xcodebuild \
-  -project /Users/vw2x/Projects/Reverses/Mira/ios/Mira/Mira.xcodeproj \
+  -project <path-to-mira-repo>/ios/Mira/Mira.xcodeproj \
   -scheme Mira \
   -configuration Debug \
   -sdk iphoneos \
   -destination 'id=b8b0fe95e9624225302276f374cb734e3dfeedaf' \
-  -derivedDataPath /Users/vw2x/Projects/Reverses/Mira/build/ios-mira-device-native-relay-derived \
+  -derivedDataPath <path-to-mira-repo>/build/ios-mira-device-native-relay-derived \
   -allowProvisioningUpdates \
   -allowProvisioningDeviceRegistration \
   ENABLE_DEBUG_DYLIB=NO \
@@ -307,9 +307,9 @@ env -u LIBRARY_PATH -u SDKROOT xcodebuild \
 安装命令:
 
 ```bash
-/Users/vw2x/Projects/Reverses/Mira/build/ios-tools/node_modules/.bin/ios-deploy \
+<path-to-mira-repo>/build/ios-tools/node_modules/.bin/ios-deploy \
   --id b8b0fe95e9624225302276f374cb734e3dfeedaf \
-  --bundle /Users/vw2x/Projects/Reverses/Mira/build/ios-mira-device-native-relay-derived/Build/Products/Debug-iphoneos/Mira.app \
+  --bundle <path-to-mira-repo>/build/ios-mira-device-native-relay-derived/Build/Products/Debug-iphoneos/Mira.app \
   --faster-path-search
 ```
 

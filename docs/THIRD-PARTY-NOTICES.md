@@ -22,6 +22,6 @@ Mira packages BusyBox as APK assets and releases the matching ABI binary into a 
 Mira 当前将 iSH 作为 Git submodule(Git 子模块) 接入, 用于普通 iOS(苹果移动操作系统) App(应用) 前台 shell(命令解释器) 原型。
 
 1. 上游地址: https://github.com/ish-app/ish
-2. 本地路径: `/Users/vw2x/Projects/Reverses/Mira/third_party/ish`
+2. 本地路径: `./third_party/ish`
 3. 使用目的: 提供 iOS App 前台 Linux shell backend(后端) 原型。
 4. 许可证: iSH 使用 GPLv3(通用公共许可证第 3 版), 并带有 `LICENSE.IOS` 中的 iOS 附加条款。上游说明后续贡献也兼容 GPLv2(通用公共许可证第 2 版)。

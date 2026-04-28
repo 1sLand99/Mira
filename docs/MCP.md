@@ -40,6 +40,139 @@ MIRA_RELAY_URL=http://127.0.0.1:8765 \
 python3 -m mira.mcp.server
 ```
 
+## 客户端配置总览
+
+目前这套 mira-mcp 在本仓库主要验证两类 client(客户端):
+
+1. Claude Desktop: 配置文件是 JSON(配置文件格式), 入口通常是 `claude_desktop_config.json`.
+2. Codex: 配置文件是 TOML(配置文件格式), 入口通常是 `~/.codex/config.toml`.
+
+下文所有路径示例都使用占位符, 避免把某一台开发机的用户名或绝对路径写进仓库:
+
+1. `<path-to-mira-repo>`: 你的 Mira 仓库根目录.
+2. `<path-to-python>`: 你准备拿来启动 Mira MCP server 的 Python 解释器.
+
+两者本质上都只是帮 client 用 stdio(标准输入输出) 拉起同一个 Python 模块:
+
+```text
+python -m mira.mcp.server --relay http://127.0.0.1:8765
+```
+
+真正的差异主要只有三点:
+
+1. Claude 用 JSON 写 `mcpServers`.
+2. Codex 用 TOML 写 `mcp_servers`.
+3. Codex 在非交互 `exec` 场景下, 最好把每个 Mira tool 的 `approval_mode` 单独写成 `approve`.
+
+## Claude Desktop 配置
+
+macOS 下常见配置路径:
+
+```text
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+
+本仓库根目录里也保留了一份最小示例:
+
+```text
+./claude_desktop_config.json
+```
+
+如果你希望 Claude 和 Mira 仓库使用同一套 Python 运行环境, 推荐显式写入 `command`, `cwd` 和 `PYTHONPATH`:
+
+```json
+{
+  "mcpServers": {
+    "mira": {
+      "command": "<path-to-python>",
+      "args": [
+        "-m",
+        "mira.mcp.server",
+        "--relay",
+        "http://127.0.0.1:8765"
+      ],
+      "cwd": "<path-to-mira-repo>",
+      "env": {
+        "PYTHONPATH": "<path-to-mira-repo>"
+      }
+    }
+  }
+}
+```
+
+字段含义:
+
+1. `command`: 启动 MCP server 的 Python 解释器.
+2. `args`: 固定启动 `mira.mcp.server`, 并指向本地 Relay URL.
+3. `cwd`: 让模块导入, 相对路径和日志上下文都落在 Mira 仓库内.
+4. `env.PYTHONPATH`: 明确把仓库根目录加入模块搜索路径, 避免 client 用到错误 Python 环境.
+
+配置完成后, 重启 Claude Desktop 即可.
+
+## Codex 配置
+
+Codex Desktop 和 Codex CLI 当前共用同一份配置文件:
+
+```text
+~/.codex/config.toml
+```
+
+本次已实际写入如下配置, 并用 `codex mcp list` 验证 Mira 已被识别:
+
+```toml
+[mcp_servers.mira]
+command = "<path-to-python>"
+args = ["-m", "mira.mcp.server", "--relay", "http://127.0.0.1:8765"]
+cwd = "<path-to-mira-repo>"
+env = { PYTHONPATH = "<path-to-mira-repo>" }
+default_tools_approval_mode = "approve"
+
+[mcp_servers.mira.tools.mira_list_devices]
+approval_mode = "approve"
+
+[mcp_servers.mira.tools.mira_open_terminal]
+approval_mode = "approve"
+
+[mcp_servers.mira.tools.mira_run_command]
+approval_mode = "approve"
+
+[mcp_servers.mira.tools.mira_collect_snapshot]
+approval_mode = "approve"
+
+[mcp_servers.mira.tools.mira_send_input]
+approval_mode = "approve"
+
+[mcp_servers.mira.tools.mira_read_output]
+approval_mode = "approve"
+
+[mcp_servers.mira.tools.mira_close_terminal]
+approval_mode = "approve"
+```
+
+字段含义:
+
+1. `command`, `args`, `cwd`, `env`: 和 Claude 配置里的含义一致.
+2. `default_tools_approval_mode = "approve"`: 给 Mira tools 一个默认自动放行策略.
+3. `mcp_servers.mira.tools.*.approval_mode = "approve"`: 进一步覆盖到每个 tool, 避免某些 Codex 版本在非交互 `exec` 模式下仍把调用判成 `user cancelled MCP tool call`.
+
+如果只想先快速写入一个基础项, 也可以先执行:
+
+```bash
+codex mcp add mira --env PYTHONPATH=<path-to-mira-repo> -- \
+  <path-to-python> \
+  -m mira.mcp.server \
+  --relay http://127.0.0.1:8765
+```
+
+然后再手动补上 `cwd`, `default_tools_approval_mode` 和各个 tool 的 `approval_mode`.
+
+可以用下面命令确认 Codex 已加载 Mira MCP server:
+
+```bash
+codex mcp list
+codex mcp get mira
+```
+
 ## Codex CLI 配置示例
 
 如果 Codex CLI(命令行接口) 使用 TOML(配置文件格式) 声明 MCP server, 可以按下面思路配置:
@@ -48,7 +181,8 @@ python3 -m mira.mcp.server
 [mcp_servers.mira]
 command = "python3"
 args = ["-m", "mira.mcp.server", "--relay", "http://127.0.0.1:8765"]
-cwd = "/Users/vw2x/Projects/Reverses/Mira"
+cwd = "<path-to-mira-repo>"
+env = { PYTHONPATH = "<path-to-mira-repo>" }
 default_tools_approval_mode = "approve"
 
 [mcp_servers.mira.tools.mira_list_devices]
@@ -77,10 +211,11 @@ approval_mode = "approve"
 
 ```bash
 codex -a never exec --json \
-  -C /Users/vw2x/Projects/Reverses/Mira \
+  -C <path-to-mira-repo> \
   -c 'mcp_servers.mira.command="python3"' \
   -c 'mcp_servers.mira.args=["-m","mira.mcp.server","--relay","http://127.0.0.1:8765"]' \
-  -c 'mcp_servers.mira.cwd="/Users/vw2x/Projects/Reverses/Mira"' \
+  -c 'mcp_servers.mira.cwd="<path-to-mira-repo>"' \
+  -c 'mcp_servers.mira.env={ PYTHONPATH = "<path-to-mira-repo>" }' \
   -c 'mcp_servers.mira.default_tools_approval_mode="approve"' \
   -c 'mcp_servers.mira.tools.mira_list_devices.approval_mode="approve"' \
   -c 'mcp_servers.mira.tools.mira_open_terminal.approval_mode="approve"' \
@@ -98,7 +233,8 @@ codex -a never exec --json \
 codex mcp list \
   -c 'mcp_servers.mira.command="python3"' \
   -c 'mcp_servers.mira.args=["-m","mira.mcp.server","--relay","http://127.0.0.1:8765"]' \
-  -c 'mcp_servers.mira.cwd="/Users/vw2x/Projects/Reverses/Mira"'
+  -c 'mcp_servers.mira.cwd="<path-to-mira-repo>"' \
+  -c 'mcp_servers.mira.env={ PYTHONPATH = "<path-to-mira-repo>" }'
 ```
 
 如果只配置 `default_tools_approval_mode`, 某些 Codex CLI 版本可能仍会在非交互 `exec` 模式里把 MCP tool call(工具调用) 标记为 `user cancelled MCP tool call`。给每个 Mira tool 显式设置 `approval_mode = "approve"` 后, `codex exec` 可以直接完成 list devices(列出设备), open terminal(打开终端), snapshot(快照采集) 和 close session(关闭会话)。
@@ -160,10 +296,11 @@ mira_list_devices
 
 ```bash
 codex -a never exec \
-  -C /Users/vw2x/Projects/Reverses/Mira \
+  -C <path-to-mira-repo> \
   -c 'mcp_servers.mira.command="python3"' \
   -c 'mcp_servers.mira.args=["-m","mira.mcp.server","--relay","http://127.0.0.1:8765"]' \
-  -c 'mcp_servers.mira.cwd="/Users/vw2x/Projects/Reverses/Mira"' \
+  -c 'mcp_servers.mira.cwd="<path-to-mira-repo>"' \
+  -c 'mcp_servers.mira.env={ PYTHONPATH = "<path-to-mira-repo>" }' \
   -c 'mcp_servers.mira.default_tools_approval_mode="approve"' \
   -c 'mcp_servers.mira.tools.mira_list_devices.approval_mode="approve"' \
   -c 'mcp_servers.mira.tools.mira_open_terminal.approval_mode="approve"' \

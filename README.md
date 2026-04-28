@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="./docs/GETTING-STARTED.md">Getting Started</a> ·
+  <a href="./docs/MCP.md">Claude / Codex MCP Setup</a> ·
   <a href="./docs/">Documentation</a> ·
   <a href="./docs/THIRD-PARTY-NOTICES.md">Third-Party Notices</a>
 </p>
@@ -28,6 +29,8 @@
 ### AI 运行时风险发现
 
 展示运行时真实沙盒环境, 内置 Frida 实时执行 Java/Native 逻辑, 提供 mira-mcp 供 AI 实时分析环境风险.
+
+Claude Desktop 和 Codex 的接入方式见 [`docs/MCP.md`](./docs/MCP.md).
 
 ![claude 分析算法助手的 hook 痕迹](./docs/Area.gif)
 
