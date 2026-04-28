@@ -35,6 +35,17 @@ IDB_MIRA_AUTO_CONNECT=1 \
 idb launch --udid <device-udid> com.vwww.mira.ios
 ```
 
+## iOS MCP and Frida baseline
+
+1. iOS 的 MCP PTY 和 Frida 链路建立在 iSH 兼容层上, syscall 会经过翻译, 冷启动和脚本执行都比 Android 慢.
+2. iOS 分析默认策略不是频繁开关 PTY, 而是优先保持一个长生命周期 session, 在同一个 session 中连续执行 `status -> list -> run -> rpc`.
+3. 如果调用 Mira MCP 时没有显式传 `sessionId`, 应优先复用同一 `installId` 的活动 session, 不要每一步都 reopen.
+4. iOS Frida Python 辅助逻辑不要依赖 `python3 - <<'EOF'` 这类 heredoc 注入方式, 更稳的是直接 `python3 -c` 并显式补齐 `frida-setup` 和 `PYTHONPATH`.
+5. iOS Frida 等待逻辑不要依赖 `time.sleep`, 在 iSH 环境下它可能触发 `Errno 38`. 如果必须等待, 优先用 Frida 脚本即时 `send(...)`, 或由 server 内部使用更稳的轮询策略.
+6. 当前已验证 iOS 可以稳定返回较大的枚举结果, 例如 `ObjC.enumerateLoadedClassesSync()` 级别的全量 class 枚举.
+7. 当前已验证 iOS 可以稳定返回较大的 RPC 结果, 已测通约 256 KiB 级别字符串返回.
+8. 如果 iOS 侧出现看似随机的掉线或崩溃, 先怀疑 session 生命周期和 reopen 频率, 再怀疑 Frida 脚本本身.
+
 ## Android automation baseline
 
 1. Android 自动化入口固定使用 `<path-to-mira-repo>/mira-android`.

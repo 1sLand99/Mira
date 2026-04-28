@@ -208,16 +208,36 @@ class TerminalSession:
         with self.lock:
             return bytes(self.buffer).decode("utf-8", errors="replace")
 
-    def wait_for_text(self, pattern: str, timeout: float) -> str:
-        deadline = time.monotonic() + timeout
+    def wait_for_text(self, pattern: str, timeout: float, idle_grace: float = 2.5, max_grace: float = 15.0) -> str:
+        base_timeout = max(timeout, 0.1)
+        idle_grace = max(idle_grace, 0.25)
+        max_grace = max(max_grace, idle_grace)
+        started_at = time.monotonic()
+        deadline = started_at + base_timeout
+        hard_deadline = started_at + base_timeout + max_grace
+        last_size = -1
+        last_progress_at = started_at
         with self.lock:
             while True:
                 text = bytes(self.buffer).decode("utf-8", errors="replace")
                 if pattern in text:
                     return text
-                remaining = deadline - time.monotonic()
+                current_size = len(self.buffer)
+                now = time.monotonic()
+                if current_size != last_size:
+                    last_size = current_size
+                    last_progress_at = now
+                    deadline = min(hard_deadline, max(deadline, now + idle_grace))
+                remaining = deadline - now
                 if remaining <= 0:
-                    raise ToolError(f"timeout waiting for marker: {pattern}")
+                    if now < hard_deadline and (now - last_progress_at) < idle_grace:
+                        deadline = min(hard_deadline, now + idle_grace)
+                        remaining = deadline - now
+                    else:
+                        raise ToolError(
+                            f"timeout waiting for marker: {pattern}; "
+                            f"baseTimeout={base_timeout:.2f}s idleGrace={idle_grace:.2f}s maxGrace={max_grace:.2f}s"
+                        )
                 self.lock.wait(min(remaining, 0.25))
 
     def wait_until_active(self, timeout: float) -> None:
@@ -343,12 +363,15 @@ class MiraMcpServer:
         return {
             "protocolVersion": requested if requested else PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": False}, "resources": {"listChanged": False}, "prompts": {"listChanged": False}},
-            "serverInfo": {"name": SERVER_NAME, "title": "Mira Remote Android Workbench", "version": SERVER_VERSION},
+            "serverInfo": {"name": SERVER_NAME, "title": "Mira Remote Device Workbench", "version": SERVER_VERSION},
             "instructions": (
-                "Use Mira tools to inspect connected Android devices, read outline and screen state, open an on-demand PTY session, "
+                "Use Mira tools to inspect connected Android or iOS devices, read outline and screen state, open an on-demand PTY session, "
                 "run short diagnostic commands, and use the built-in Frida runtime exposed by the Mira app. Prefer mira_get_device or "
                 "mira_list_devices to select a device, mira_run_command for non-interactive shell analysis, mira_get_screen plus "
                 "mira_send_screen_input for app UI exploration, and mira_frida_status or mira_frida_run_script for runtime instrumentation. "
+                "Important iOS guidance: the iSH-based PTY and Frida path is slower than Android because syscalls go through a translation layer, "
+                "so prefer one long-lived session for a workflow, avoid frequent open-close-open terminal churn, and batch status/list/run/RPC steps in the same session when possible. "
+                "The server already reuses an active session for the same installId when sessionId is omitted. "
                 "When the user asks for Magisk risk review, provide only the environment context: Magisk phone, third-party app shell, real PTY, and BusyBox availability."
             ),
         }
@@ -430,7 +453,7 @@ class MiraMcpServer:
             {
                 "name": "mira_open_terminal",
                 "title": "Open Android PTY session",
-                "description": "Open an on-demand terminal session on a selected device and attach as a browser client.",
+                "description": "Open an on-demand terminal session on a selected device and attach as a browser client. On iOS, prefer keeping the session alive for the whole workflow instead of frequent reopen cycles.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -444,7 +467,7 @@ class MiraMcpServer:
             {
                 "name": "mira_run_command",
                 "title": "Run command in Android PTY",
-                "description": "Run a command in a persistent Android terminal session and wait for a marker with exit status.",
+                "description": "Run a command in a persistent device terminal session and wait for a marker with exit status. On iOS, command startup is slower because it runs through iSH syscall translation.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -494,7 +517,7 @@ class MiraMcpServer:
             {
                 "name": "mira_frida_status",
                 "title": "Read Mira Frida runtime status",
-                "description": "Verify the built-in Frida runtime is reachable from the Mira Android sandbox and return target summary JSON.",
+                "description": "Verify the built-in Frida runtime is reachable from the Mira sandbox and return target summary JSON. On iOS, allow higher latency and prefer reusing the same session for follow-up Frida calls.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -510,7 +533,7 @@ class MiraMcpServer:
             {
                 "name": "mira_frida_list_processes",
                 "title": "List Frida-visible processes",
-                "description": "Enumerate processes visible from the Mira built-in Frida remote device and return a trimmed process list.",
+                "description": "Enumerate processes visible from the Mira built-in Frida remote device and return a trimmed process list. On iOS, this is optimized for the slower iSH-backed Python runtime.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -527,7 +550,7 @@ class MiraMcpServer:
             {
                 "name": "mira_frida_run_script",
                 "title": "Run Frida JavaScript inside Mira",
-                "description": "Attach to the built-in Frida Gadget target, load a JavaScript snippet, collect send() messages, and optionally call an exported RPC method.",
+                "description": "Attach to the built-in Frida Gadget target, load a JavaScript snippet, collect send() messages, and optionally call an exported RPC method. On iOS, prefer running multiple Frida operations in one reused session.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -737,7 +760,10 @@ class MiraMcpServer:
     def tool_frida_status(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session, opened = self.ensure_session(arguments)
         command = "frida --status"
-        result = self.execute_json_command(session, command, float(arguments.get("timeoutSeconds") or 8.0), "mira_frida_status")
+        device = self.device_for_session(session)
+        platform = self.device_platform(device)
+        timeout = float(arguments.get("timeoutSeconds") or (20.0 if platform == "ios" else 8.0))
+        result = self.execute_json_command(session, command, timeout, "mira_frida_status")
         payload = {
             "sessionId": session.session_id,
             "openedSession": opened,
@@ -755,17 +781,24 @@ class MiraMcpServer:
             raise ToolError("limit must be >= 1")
         limit = min(limit, 256)
         session, opened = self.ensure_session(arguments)
-        python_source = self.build_frida_python_source(
-            {
-                "mode": "list_processes",
-                "host": "127.0.0.1:27042",
-                "limit": limit,
-            }
-        )
+        device = self.device_for_session(session)
+        platform = self.device_platform(device)
+        timeout = float(arguments.get("timeoutSeconds") or (20.0 if platform == "ios" else 8.0))
+        if platform == "ios":
+            command = self.wrap_ios_python_command(self.build_ios_frida_list_python_source(limit))
+        else:
+            python_source = self.build_frida_python_source(
+                {
+                    "mode": "list_processes",
+                    "host": "127.0.0.1:27042",
+                    "limit": limit,
+                }
+            )
+            command = self.wrap_python_command(python_source)
         result = self.execute_json_command(
             session,
-            self.wrap_python_command(python_source),
-            float(arguments.get("timeoutSeconds") or 8.0),
+            command,
+            timeout,
             "mira_frida_list_processes",
         )
         payload = {
@@ -790,21 +823,35 @@ class MiraMcpServer:
         if wait_seconds < 0:
             raise ToolError("waitSeconds must be >= 0")
         session, opened = self.ensure_session(arguments)
-        python_source = self.build_frida_python_source(
-            {
-                "mode": "run_script",
-                "host": "127.0.0.1:27042",
-                "target": str(arguments.get("target") or "Gadget"),
-                "scriptBase64": base64.b64encode(script.encode("utf-8")).decode("ascii"),
-                "rpcMethod": str(arguments.get("rpcMethod") or ""),
-                "rpcArgs": rpc_args,
-                "waitSeconds": wait_seconds,
-            }
-        )
+        device = self.device_for_session(session)
+        platform = self.device_platform(device)
+        timeout = float(arguments.get("timeoutSeconds") or (30.0 if platform == "ios" else 12.0))
+        if platform == "ios":
+            python_source = self.build_ios_frida_run_script_python_source(
+                script=script,
+                target=str(arguments.get("target") or "Gadget"),
+                rpc_method=str(arguments.get("rpcMethod") or ""),
+                rpc_args=rpc_args,
+                wait_seconds=wait_seconds,
+            )
+            command = self.wrap_ios_python_command(python_source)
+        else:
+            python_source = self.build_frida_python_source(
+                {
+                    "mode": "run_script",
+                    "host": "127.0.0.1:27042",
+                    "target": str(arguments.get("target") or "Gadget"),
+                    "scriptBase64": base64.b64encode(script.encode("utf-8")).decode("ascii"),
+                    "rpcMethod": str(arguments.get("rpcMethod") or ""),
+                    "rpcArgs": rpc_args,
+                    "waitSeconds": wait_seconds,
+                }
+            )
+            command = self.wrap_python_command(python_source)
         result = self.execute_json_command(
             session,
-            self.wrap_python_command(python_source),
-            float(arguments.get("timeoutSeconds") or 12.0),
+            command,
+            timeout,
             "mira_frida_run_script",
         )
         payload = {
@@ -841,17 +888,39 @@ class MiraMcpServer:
                 return device
         raise ToolError(f"unknown installId: {install_id}")
 
+    def device_for_session(self, session: TerminalSession) -> dict[str, Any] | None:
+        try:
+            return self.find_device(self.list_devices(), session.install_id)
+        except ToolError:
+            return None
+
+    @staticmethod
+    def device_platform(device: dict[str, Any] | None) -> str:
+        if not device:
+            return ""
+        return str(device.get("platform") or "").strip().lower()
+
     def ensure_session(self, arguments: dict[str, Any]) -> tuple[TerminalSession, bool]:
         session_id = str(arguments.get("sessionId") or "")
         opened = False
         if not session_id:
+            install_id = str(arguments.get("installId") or "")
+            if not install_id:
+                try:
+                    install_id = self.resolve_install_id(arguments.get("installId"))
+                except ToolError:
+                    install_id = ""
+            if install_id:
+                for existing in self.sessions.values():
+                    if existing.install_id == install_id and existing.active:
+                        return existing, False
             opened_data = self.tool_open_terminal(arguments)
             session_id = str(opened_data["sessionId"])
             opened = True
         return self.get_session(session_id), opened
 
     def execute_command(self, session: TerminalSession, command: str, timeout: float) -> dict[str, Any]:
-        session.wait_until_active(min(max(timeout, 1.0), 5.0))
+        session.wait_until_active(max(5.0, min(timeout, 20.0)))
         marker = f"__MIRA_MCP_DONE_{uuid.uuid4().hex}__"
         before = len(session.buffer)
         session.send_input(command.rstrip("\n") + "\nprintf '\\n%s:%s\\n' " + shlex.quote(marker) + " \"$?\"\n")
@@ -915,6 +984,133 @@ class MiraMcpServer:
     def wrap_python_command(source: str) -> str:
         marker = f"MIRA_PY_{uuid.uuid4().hex}"
         return f"python3 - <<'{marker}'\n{source.rstrip()}\n{marker}"
+
+    @staticmethod
+    def wrap_ios_python_command(source: str) -> str:
+        return (
+            'frida-setup >/dev/null 2>&1; '
+            'export PYTHONPATH="/opt/mira/frida-python/site-packages${PYTHONPATH:+:$PYTHONPATH}"; '
+            + "python3 -c "
+            + shlex.quote(source.rstrip())
+        )
+
+    @staticmethod
+    def build_ios_frida_list_python_source(limit: int) -> str:
+        return f"""
+import frida
+import json
+import traceback
+
+def to_jsonable(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {{str(k): to_jsonable(v) for k, v in value.items()}}
+    if isinstance(value, (list, tuple)):
+        return [to_jsonable(item) for item in value]
+    return str(value)
+
+payload = {{"ok": False}}
+
+try:
+    device = frida.get_device_manager().add_remote_device("127.0.0.1:27042")
+    processes = device.enumerate_processes()
+    payload = {{
+        "ok": True,
+        "fridaVersion": getattr(frida, "__version__", ""),
+        "processCount": len(processes),
+        "processes": [
+            {{
+                "pid": getattr(proc, "pid", None),
+                "name": getattr(proc, "name", None),
+                "parameters": to_jsonable(getattr(proc, "parameters", {{}})),
+            }}
+            for proc in processes[:{limit}]
+        ],
+    }}
+except Exception as exc:
+    payload = {{
+        "ok": False,
+        "error": str(exc),
+        "traceback": traceback.format_exc().splitlines(),
+    }}
+
+print(json.dumps(payload, ensure_ascii=False))
+raise SystemExit(0 if payload.get("ok") else 1)
+""".strip()
+
+    @staticmethod
+    def build_ios_frida_run_script_python_source(
+        script: str,
+        target: str,
+        rpc_method: str,
+        rpc_args: list[Any],
+        wait_seconds: float,
+    ) -> str:
+        script_base64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
+        rpc_args_base64 = base64.b64encode(json.dumps(rpc_args, ensure_ascii=False).encode("utf-8")).decode("ascii")
+        return f"""
+import base64
+import frida
+import json
+import time
+import traceback
+
+def to_jsonable(value):
+    if isinstance(value, (bytes, bytearray)):
+        return {{"type": "bytes", "dataBase64": base64.b64encode(value).decode("ascii")}}
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {{str(k): to_jsonable(v) for k, v in value.items()}}
+    if isinstance(value, (list, tuple)):
+        return [to_jsonable(item) for item in value]
+    return str(value)
+
+payload = {{"ok": False}}
+
+try:
+    device = frida.get_device_manager().add_remote_device("127.0.0.1:27042")
+    messages = []
+    session = device.attach({target!r})
+    script = session.create_script(base64.b64decode({script_base64!r}).decode("utf-8"))
+
+    def on_message(message, data):
+        entry = to_jsonable(message)
+        if data is not None:
+            entry["dataBase64"] = base64.b64encode(data).decode("ascii")
+        messages.append(entry)
+
+    script.on("message", on_message)
+    script.load()
+    rpc_method = {rpc_method!r}
+    rpc_result = None
+    if rpc_method:
+        rpc_args = json.loads(base64.b64decode({rpc_args_base64!r}).decode("utf-8"))
+        rpc_result = getattr(script.exports, rpc_method)(*rpc_args)
+    else:
+        deadline = time.monotonic() + max({wait_seconds!r}, 0.0)
+        while time.monotonic() < deadline:
+            pass
+    payload = {{
+        "ok": True,
+        "fridaVersion": getattr(frida, "__version__", ""),
+        "target": {target!r},
+        "rpcMethod": rpc_method,
+        "rpcResult": to_jsonable(rpc_result),
+        "messageCount": len(messages),
+        "messages": messages,
+    }}
+except Exception as exc:
+    payload = {{
+        "ok": False,
+        "error": str(exc),
+        "traceback": traceback.format_exc().splitlines(),
+    }}
+
+print(json.dumps(payload, ensure_ascii=False))
+raise SystemExit(0 if payload.get("ok") else 1)
+""".strip()
 
     @staticmethod
     def build_frida_python_source(spec: dict[str, Any]) -> str:
@@ -1040,6 +1236,7 @@ raise SystemExit(0 if payload.get("ok") else 1)
             {"uri": "mira://analysis-guide", "name": "Mira Android analysis guide", "mimeType": "text/markdown"},
             {"uri": "mira://magisk-app-shell-context", "name": "Mira Magisk app-shell context", "mimeType": "text/markdown"},
             {"uri": "mira://frida-guide", "name": "Mira built-in Frida guide", "mimeType": "text/markdown"},
+            {"uri": "mira://ios-frida-guide", "name": "Mira iOS Frida guide", "mimeType": "text/markdown"},
             {"uri": "mira://sessions", "name": "Mira active MCP sessions", "mimeType": "application/json"},
             {"uri": "mira://relay", "name": "Mira relay configuration", "mimeType": "application/json"},
         ]
@@ -1052,6 +1249,8 @@ raise SystemExit(0 if payload.get("ok") else 1)
             return {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": MAGISK_CONTEXT}]}
         if uri == "mira://frida-guide":
             return {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": FRIDA_GUIDE}]}
+        if uri == "mira://ios-frida-guide":
+            return {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": IOS_FRIDA_GUIDE}]}
         if uri == "mira://sessions":
             data = {key: {"installId": value.install_id, "status": value.status, "active": value.active} for key, value in self.sessions.items()}
             return {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, ensure_ascii=False, indent=2)}]}
@@ -1077,7 +1276,7 @@ raise SystemExit(0 if payload.get("ok") else 1)
             {
                 "name": "mira_frida_triage",
                 "title": "Mira built-in Frida triage",
-                "description": "Guide an AI client to verify Frida connectivity, enumerate the Gadget target, and run small Frida scripts through Mira MCP.",
+                "description": "Guide an AI client to verify Frida connectivity, enumerate the Gadget target, and run small Frida scripts through Mira MCP. On iOS, keep one session alive and batch the workflow.",
                 "arguments": [{"name": "installId", "description": "Optional target installId", "required": False}],
             },
         ]
@@ -1157,7 +1356,21 @@ FRIDA_GUIDE = """# Mira 内置 Frida 指南
 4. 如果只是做轻量探针, 建议脚本直接 `send({...})` 输出结构化信息。例如 `send({ pid: Process.id, arch: Process.arch })`。
 5. 如果要拿返回值, 可以在脚本里定义 `rpc.exports = { ping() { return "pong"; } }`, 再通过 `rpcMethod` 和 `rpcArgs` 调用。
 6. 二进制 message data 会被编码成 `dataBase64`, 非 JSON 类型结果会被尽量转换为 JSON 兼容结构或字符串。
-7. Frida 相关工具底层仍通过 Mira PTY 中的 Python runtime 与 `frida` 模块交互, 所以分析完成后如无持续交互需求, 记得关闭 PTY 会话。
+7. iOS 设备上的 PTY 和 Frida 调用会经过 iSH syscall translation(系统调用翻译), 整体延迟明显高于 Android。
+8. iOS 分析时优先保持一个 PTY session(会话) 持续存活, 在同一个 session 里连续执行 `status -> list -> run -> rpc`, 不要频繁 open-close-open。
+9. 当前 server 已经会在 `sessionId` 省略且同一 `installId` 已有活动 session 时自动复用它。
+10. Frida 相关工具底层仍通过 Mira PTY 中的 Python runtime 与 `frida` 模块交互, 所以分析完成后如无持续交互需求, 再关闭 PTY 会话。
+"""
+
+IOS_FRIDA_GUIDE = """# Mira iOS Frida 指南
+
+1. iOS 侧的 MCP PTY 和 Frida 运行链路建立在 iSH compatibility layer(兼容层) 上, syscall(系统调用) 会经过翻译, 所以冷启动和脚本执行都比 Android 慢。
+2. 默认策略应该是先开一个 PTY session, 然后在同一个 session 里连续执行 `mira_frida_status`, `mira_frida_list_processes`, `mira_frida_run_script`。
+3. 除非分析结束, 否则不要在每一步后都立即关闭 PTY session, 因为频繁 reopen(重开) 比复用 session 更脆弱。
+4. 当前 iOS 已实测可稳定返回大枚举结果, 例如 `ObjC.enumerateLoadedClassesSync()` 可返回数百个 image(映像) 和数万条 class(类) 记录。
+5. 当前 iOS 已实测可稳定返回较大的 RPC 结果, 例如 256 KiB 级别字符串返回。
+6. 如果需要做多步 Frida 工作流, 优先把 `closeAfter` 设为 `false`, 最后再显式调用 `mira_close_terminal`。
+7. 如果必须逐步调用多个 Frida tool, 也优先复用同一个 MCP server 生命周期, 让 server 自动复用已有 session。
 """
 
 
@@ -1196,8 +1409,9 @@ FRIDA_PROMPT = """请通过 Mira MCP 工具验证并使用 Mira Android App 内�
 3. 调用 `mira_frida_list_processes` 查看当前 Frida 视角下可见进程。
 4. 调用 `mira_frida_run_script` 运行一段最小脚本, 例如 `send({ pid: Process.id, arch: Process.arch, platform: Process.platform })`。
 5. 如果需要, 再运行带 `rpc.exports` 的脚本并通过 `rpcMethod` 调用导出函数。
-6. 总结 Frida 是否可用, 当前默认目标是谁, 收到了哪些消息, 以及后续可继续做什么分析。
-7. 结束后关闭 PTY 会话。
+6. 如果目标是 iOS, 优先复用同一个 PTY session 完成整个工作流, 不要频繁 open-close-open。
+7. 总结 Frida 是否可用, 当前默认目标是谁, 收到了哪些消息, 以及后续可继续做什么分析。
+8. 结束后关闭 PTY 会话。
 """
 
 

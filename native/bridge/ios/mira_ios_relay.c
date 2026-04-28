@@ -68,6 +68,8 @@ typedef struct mira_ios_session_state {
     int cell_height;
     mira_ws_connection_t *ws;
     mira_shell_session_t *shell;
+    pthread_t reader_thread;
+    int reader_started;
     volatile int running;
 } mira_ios_session_state_t;
 
@@ -715,9 +717,7 @@ static void *mira_session_thread(void *arg) {
     }
     mira_status_set("session attached: %s", session->session_id);
 
-    pthread_t reader;
-    int reader_started = pthread_create(&reader, NULL, mira_session_shell_reader, session) == 0;
-    if (reader_started) pthread_detach(reader);
+    session->reader_started = pthread_create(&session->reader_thread, NULL, mira_session_shell_reader, session) == 0;
 
     while (session->running && mira_is_running()) {
         mira_ws_frame_t frame;
@@ -771,6 +771,10 @@ done:
     if (session->shell != NULL) {
         mira_shell_close(session->shell);
         session->shell = NULL;
+    }
+    if (session->reader_started) {
+        pthread_join(session->reader_thread, NULL);
+        session->reader_started = 0;
     }
     if (session->ws != NULL) {
         mira_ws_close(session->ws);
