@@ -555,7 +555,7 @@ class MiraMcpServer:
 
     def tool_list_devices(self, arguments: dict[str, Any]) -> dict[str, Any]:
         if bool(arguments.get("refresh")):
-            return self.tool_discover_devices(arguments)
+            self.tool_discover_devices(arguments)
         devices = self.list_devices()
         if bool(arguments.get("onlyOnline")):
             devices = self.online_devices(devices)
@@ -651,20 +651,39 @@ class MiraMcpServer:
         return result
 
     def tool_collect_snapshot(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        command = "\n".join(
-            [
-                "echo '[mira] basic'",
-                "/system/bin/id 2>/dev/null || id",
-                "/system/bin/uname -a 2>/dev/null || uname -a",
-                "pwd",
-                "printf 'PREFIX=%s\\n' \"$PREFIX\"",
-                "printf 'PATH=%s\\n' \"$PATH\"",
-                "printf 'MIRA_BUSYBOX_ABI=%s\\n' \"$MIRA_BUSYBOX_ABI\"",
-                "printf 'MIRA_BUSYBOX=%s\\n' \"$MIRA_BUSYBOX\"",
-                "printf 'MIRA_TOOLBOX_MANIFEST=%s\\n' \"$MIRA_TOOLBOX_MANIFEST\"",
-                "command -v busybox",
-                "busybox echo busybox-ok",
-                "busybox --list 2>/dev/null | (/system/bin/head -80 2>/dev/null || head -80)",
+        devices = self.list_devices()
+        install_id = self.resolve_install_id(arguments.get("installId"), devices=devices)
+        device = self.find_device(devices, install_id)
+        platform = str(device.get("platform") or "").strip().lower()
+        base_commands = [
+            "echo '[mira] basic'",
+            "/system/bin/id 2>/dev/null || id",
+            "/system/bin/uname -a 2>/dev/null || uname -a",
+            "pwd",
+            "printf 'PREFIX=%s\\n' \"$PREFIX\"",
+            "printf 'PATH=%s\\n' \"$PATH\"",
+            "printf 'MIRA_BUSYBOX_ABI=%s\\n' \"$MIRA_BUSYBOX_ABI\"",
+            "printf 'MIRA_BUSYBOX=%s\\n' \"$MIRA_BUSYBOX\"",
+            "printf 'MIRA_TOOLBOX_MANIFEST=%s\\n' \"$MIRA_TOOLBOX_MANIFEST\"",
+            "command -v busybox",
+            "busybox echo busybox-ok",
+            "busybox --list 2>/dev/null | (/system/bin/head -80 2>/dev/null || head -80)",
+        ]
+        if platform == "ios":
+            platform_commands = [
+                "echo '[mira] ios'",
+                "uname -m",
+                "echo '[mira] mounts'",
+                "(mount 2>/dev/null || cat /proc/mounts 2>/dev/null) | head -80",
+                "echo '[mira] storage'",
+                "df -h",
+                "echo '[mira] process'",
+                "(ps 2>/dev/null || busybox ps 2>/dev/null) | head -80",
+                "echo '[mira] meminfo'",
+                "(cat /proc/meminfo 2>/dev/null || free 2>/dev/null || vm_stat 2>/dev/null) | head -30",
+            ]
+        else:
+            platform_commands = [
                 "echo '[mira] android'",
                 "/system/bin/getprop ro.product.model 2>/dev/null || getprop ro.product.model",
                 "/system/bin/getprop ro.build.version.sdk 2>/dev/null || getprop ro.build.version.sdk",
@@ -678,8 +697,9 @@ class MiraMcpServer:
                 "echo '[mira] meminfo'",
                 "(/system/bin/cat /proc/meminfo 2>/dev/null || cat /proc/meminfo) | (/system/bin/head -30 2>/dev/null || head -30)",
             ]
-        )
+        command = "\n".join(base_commands + platform_commands)
         call_args = dict(arguments)
+        call_args["installId"] = install_id
         call_args["command"] = command
         call_args["timeoutSeconds"] = float(arguments.get("timeoutSeconds") or 15.0)
         result = self.tool_run_command(call_args)
