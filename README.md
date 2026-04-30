@@ -1,8 +1,12 @@
 <p align="center">
-  <img src="./apps/console/app/icon.svg" alt="MIRA icon" width="88" />
+  <img src="./apps/console/app/icon.svg" alt="Mira icon" width="88" />
 </p>
 
-<h1 align="center">MIRA</h1>
+<h1 align="center">Mira</h1>
+
+<p align="center">
+  <a href="./README.zh-CN.md">简体中文</a>
+</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Android-iOS-2f855a?style=flat-square" alt="Android and iOS" />
@@ -12,7 +16,7 @@
 </p>
 
 <p align="center">
-  AI 时代移动安全防护策略快速产出工具
+  AI-native mobile runtime analysis workspace for authorized Android and iOS research.
 </p>
 
 <p align="center">
@@ -22,22 +26,23 @@
   <a href="./docs/THIRD-PARTY-NOTICES.md">Third-Party Notices</a>
 </p>
 
+## What Mira is
 
+Mira is a mobile research workspace for teams that need to inspect the real runtime state of their own app under authorization. It combines a browser console, built-in Relay, remote PTY, and Frida-powered inspection so AI agents and human researchers can work against the same live session.
 
-## 核心能力
+![Claude analyzing runtime hook traces](./docs/Area.gif)
 
-### AI 运行时风险发现
+## Key capabilities
 
-展示运行时真实沙盒环境, 内置 Frida 实时执行 Java/Native 逻辑, 提供 mira-mcp 供 AI 实时分析环境风险.
+### AI-ready runtime inspection
 
-Claude Desktop 和 Codex 的接入方式见 [`docs/MCP.md`](./docs/MCP.md).
+Mira exposes the actual app sandbox, ships with built-in Frida execution for Java and Native analysis, and provides `mira-mcp` so Codex or Claude can inspect a live device session through standard MCP tooling.
 
-![claude 分析算法助手的 hook 痕迹](./docs/Area.gif)
+See [`docs/MCP.md`](./docs/MCP.md) for the MCP integration flow.
 
+### Android and iOS workbench
 
-### Android / iOS 双端工作台
-
-动态集成 busybox 命令集和 Frida gadget, 交互式分析进程视角 procfs (iOS 为 syscall 模拟实现).
+Mira integrates a BusyBox-style toolbox, Frida gadget support, and an interactive process-oriented shell view across both platforms. On iOS, the PTY and process view are adapted to the iSH compatibility layer.
 
 <table>
   <tr>
@@ -50,44 +55,88 @@ Claude Desktop 和 Codex 的接入方式见 [`docs/MCP.md`](./docs/MCP.md).
   </tr>
 </table>
 
-> 当前内置删减版 Frida gadget, 存在注入特征和偶发崩溃, 下个迭代会逐步去特征并优化稳定性. 欢迎提 issue / PR.
+### Optional public access through Relay
 
+With Relay, you can temporarily expose an authorized session beyond the local network. This is useful for cloud devices, remote collaboration, or fast handoff during a live analysis session.
 
-### 可选公网访问
+![Relay exposed through cpolar](./docs/public-deploy.png)
 
-配合 Relay, 可通过[脚本](./mira-web)将临时授权会话扩展到公网 —— 适用于云手机等不便 adb 的场景, 也方便快速邀请他人协助分析 🤝
+### Knowledge capture for repeatable reviews
 
-![使用 cpolar 方案公网访问](./docs/public-deploy.png)
+Each investigation can be turned into reusable assets: articles for process notes, cases for evidence chains, and skills for AI-assisted review flows.
 
+## Supported workflows
 
-### 持续沉淀经验
+1. Start a local or public Relay.
+2. Connect an Android or iOS Mira app instance.
+3. Open the browser console and remote PTY.
+4. Attach MCP clients such as Codex or Claude.
+5. Run Frida, shell, and runtime inspection tasks against the same authorized session.
 
-每分析一个环境或框架, 沉淀三类资产: **文章**(分析过程与关键坑点)、**Case**(证据链与后续验证方向)、**Skill**(可被 AI 调用的检查流程). 如果你关注 AI 如何提升移动安全效率, 欢迎 star / watch.
+## Quick start
 
+### Launch Relay and the web console
 
+```bash
+./mira-local-web
+```
 
-## 授权研究边界
+For temporary public sharing:
 
-Mira 只面向授权研究和自有 App 分析:
+```bash
+./mira-web
+```
 
-1. 只观察和交互 Mira 宿主 App 自身沙盒
-2. 不控制其他 App
-3. 不提供系统级远控能力
-4. 不提供 root / jailbreak 绕过或系统沙盒绕过能力
-5. 不提供生产 SDK 或静默后台控制能力 (必须从 Mira App 内主动连接 Relay 后才存在)
+### Android automation path
 
+```bash
+MIRA_ANDROID_RELAY_URL="http://<host-ip>:8765" \
+./mira-android
+```
 
+### iOS simulator path
 
-## 致谢
+```bash
+./mira-ios
+```
 
-- [lamda](https://github.com/firerpa/lamda): Web 控制台 UI 完全仿照 lamda 工作台.
-- [Termux](https://github.com/termux/termux-app): Android 侧终端体验与可扩展终端生态.
-- [iSH](https://github.com/ish-app/ish): iOS 侧 Linux shell 与 syscall 转换路径.
+### MCP server
 
+```bash
+python3 -m mira.mcp.server \
+  --relay http://127.0.0.1:8765
+```
 
+For detailed setup, device launch, and troubleshooting, see [`docs/GETTING-STARTED.md`](./docs/GETTING-STARTED.md).
 
-## 开源许可证
+## Repository structure
 
-`GPL-3.0-only`. 第三方组件按各自上游许可证分发, 详见 `docs/THIRD-PARTY-NOTICES.md`.
+- `android/`: Android app and platform integration.
+- `ios/`: iOS app, iSH-based runtime bridge, and device workflows.
+- `apps/console/`: Web console UI.
+- `mira/`: Relay, MCP server, and Python CLI implementation.
+- `native/`: Shared native runtime components.
+- `docs/`: Setup notes, architecture, and platform-specific documentation.
+- `tools/`: Build, packaging, and helper scripts.
 
-详细文档见 `docs/`, 安装入口见 `docs/GETTING-STARTED.md`.
+## Research boundaries
+
+Mira is designed for authorized research on apps and environments you own or are explicitly permitted to inspect.
+
+1. It observes and interacts with the Mira host app sandbox.
+2. It does not control unrelated third-party apps.
+3. It does not provide system-wide remote control.
+4. It does not provide root or jailbreak bypass capabilities.
+5. It is not a production SDK or a silent background control channel.
+
+## Acknowledgements
+
+- [lamda](https://github.com/firerpa/lamda): inspiration for the web workbench interaction model.
+- [Termux](https://github.com/termux/termux-app): Android terminal UX and extensible shell ecosystem.
+- [iSH](https://github.com/ish-app/ish): iOS-side Linux shell compatibility and syscall translation path.
+
+## License
+
+`GPL-3.0-only`.
+
+Third-party components are distributed under their respective upstream licenses. See [`docs/THIRD-PARTY-NOTICES.md`](./docs/THIRD-PARTY-NOTICES.md) for details.
