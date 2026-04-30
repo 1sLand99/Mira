@@ -1,1 +1,3 @@
-"""Mira 最小 Web Terminal 后端包。"""
+"""Mira 桌面控制端与构建工具包。"""
+
+__version__ = "0.4.0"

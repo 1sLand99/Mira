@@ -150,7 +150,64 @@ python3 -m mira.mcp.server \
 
 `shell` 会进入交互式远程 PTY, 按 `Ctrl-]` 退出本地 CLI 会话并关闭远程 session.
 
-## 7. 使用须知
+## 7. 统一构建与打包
+
+仓库现在提供一个统一构建入口, 用来收口桌面控制端 Python package, Android APK 和 iOS device archive.
+
+先确保本地已经有:
+
+1. `python3`
+2. Android `adb` 与 Gradle 依赖
+3. Xcode 命令行工具
+4. iOS 真机构建时需要可用的 device UDID
+
+统一构建示例:
+
+```bash
+./mira-build
+```
+
+只构建 Python package 和 Android APK:
+
+```bash
+./mira-build --target python --target android
+```
+
+只构建 iOS 真机产物并显式指定设备:
+
+```bash
+./mira-build --target ios --ios-device-id <device-udid>
+```
+
+如果是给 CI 或本机无真机环境使用, 可以显式走 `generic iphoneos(通用 iPhoneOS 目标)`:
+
+```bash
+./mira-build --target ios --ios-destination-mode generic
+```
+
+产物会统一落到:
+
+```text
+dist/
+  python/
+    mira-<version>.tar.gz
+    mira-<version>-py3-none-any.whl
+  android/
+    mira-app-debug.apk
+  ios/
+    Mira-unsigned.ipa
+    Mira.app.zip
+  release-manifest.json
+```
+
+其中 iOS 流程会先做真机 `xcodebuild`, 再把 `Debug-iphoneos/Mira.app` 归档成:
+
+1. `Mira-unsigned.ipa`
+2. `Mira.app.zip`
+
+`Mira.app.zip` 是保底归档物, 方便在 IPA 流程排障时保留原始 device `.app`.
+
+## 8. 使用须知
 
 使用 Mira 即表示你确认:
 
@@ -160,7 +217,7 @@ python3 -m mira.mcp.server \
 4. 所有会话都必须从 Mira App 内主动发起, 且仅限 Mira 自身 App 沙盒和普通第三方 App 权限范围.
 5. 使用者需自行遵守适用法律, 平台规则和内部安全规范.
 
-## 8. 重新 clone 后的恢复清单
+## 9. 重新 clone 后的恢复清单
 
 如果本地目录丢失后重新 clone, 推荐按下面顺序恢复:
 

@@ -163,6 +163,29 @@ IDB_MIRA_AUTO_CONNECT=1 \
 idb launch --udid <device-udid> com.vwww.mira.ios
 ```
 
+### unsigned IPA 归档
+
+统一构建入口 `./mira-build --target ios --ios-device-id <device-udid>` 会复用真机 `xcodebuild` 产物目录:
+
+```text
+build/ios-mira-device-native-relay-derived/Build/Products/Debug-iphoneos/Mira.app
+```
+
+然后做两层归档:
+
+1. 直接把 `Mira.app` 打成 `dist/ios/Mira.app.zip`
+2. 按 iOS 标准分发目录组装 `Payload/Mira.app`, 再压成 `dist/ios/Mira-unsigned.ipa`
+
+这里的 unsigned IPA 指不额外走导出签名和发布签名流程, 只对已构建出的 device `.app` 做容器归档.
+
+如果是 CI 或没有连接真机的环境, 可以改用:
+
+```bash
+./mira-build --target ios --ios-destination-mode generic
+```
+
+这条链路会走 `generic/platform=iOS`, 适合做统一打包和产物归档. 真机专属安装验证仍建议保留在本地人工验收阶段.
+
 ## Relay 联调路径
 
 1. 启动 Mira relay 服务端。
