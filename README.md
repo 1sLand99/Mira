@@ -1,24 +1,14 @@
-<p align="right">
-  <a href="./README.zh-CN.md">简体中文</a>
+<p align="center">
+  English · <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-# Mira
+<h1 align="center">Mira</h1>
 
 <p align="center">
-  A modern mobile defense workspace for live risk discovery, runtime verification, and AI-accelerated hardening.
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Android-iOS-2f855a?style=flat-square" alt="Android and iOS" />
-  <img src="https://img.shields.io/badge/MCP-AI%20Ready-0f172a?style=flat-square" alt="MCP AI Ready" />
-  <img src="https://img.shields.io/badge/Relay-Frida-2563eb?style=flat-square" alt="Relay and Frida" />
+  AI-native mobile runtime risk discovery for Android and iOS.
 </p>
 
 ![Claude analyzing runtime hook traces](./docs/Area.gif)
-
-<p align="center">
-  Built for security teams that need faster evidence collection, sharper runtime verification, and more repeatable hardening workflows.
-</p>
 
 ## Why security teams use Mira
 

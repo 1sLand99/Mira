@@ -1,24 +1,14 @@
-<p align="right">
-  <a href="./README.md">English</a>
+<p align="center">
+  <a href="./README.md">English</a> · 简体中文
 </p>
 
-# Mira
+<h1 align="center">Mira</h1>
 
 <p align="center">
-  面向现代移动防护团队的工作台, 用于实时风险发现, 运行时验证和 AI 驱动的加固提效.
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Android-iOS-2f855a?style=flat-square" alt="Android and iOS" />
-  <img src="https://img.shields.io/badge/MCP-AI%20Ready-0f172a?style=flat-square" alt="MCP AI Ready" />
-  <img src="https://img.shields.io/badge/Relay-Frida-2563eb?style=flat-square" alt="Relay and Frida" />
+  面向 Android 与 iOS 的 AI 原生移动运行时风险发现工作台.
 </p>
 
 ![claude 分析算法助手的 hook 痕迹](./docs/Area.gif)
-
-<p align="center">
-  为安全团队提供更快的证据采集, 更准的运行时验证, 以及更可复用的加固工作流.
-</p>
 
 ## 为什么安全团队会用 Mira
 
