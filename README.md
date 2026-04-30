@@ -1,48 +1,44 @@
-<p align="center">
-  <img src="./apps/console/app/icon.svg" alt="Mira icon" width="88" />
+<p align="right">
+  <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-<h1 align="center">Mira</h1>
+# Mira
 
 <p align="center">
-  <a href="./README.zh-CN.md">简体中文</a>
+  A modern mobile defense workspace for live risk discovery, runtime verification, and AI-accelerated hardening.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Android-iOS-2f855a?style=flat-square" alt="Android and iOS" />
-  <img src="https://img.shields.io/badge/Built--in-MCP-0f172a?style=flat-square" alt="Built-in MCP" />
-  <img src="https://img.shields.io/badge/Built--in-Frida-dc2626?style=flat-square" alt="Built-in Frida" />
-  <img src="https://img.shields.io/badge/Relay-Ready-2563eb?style=flat-square" alt="Relay Ready" />
+  <img src="https://img.shields.io/badge/MCP-AI%20Ready-0f172a?style=flat-square" alt="MCP AI Ready" />
+  <img src="https://img.shields.io/badge/Relay-Frida-2563eb?style=flat-square" alt="Relay and Frida" />
 </p>
-
-<p align="center">
-  AI-native mobile runtime analysis workspace for authorized Android and iOS research.
-</p>
-
-<p align="center">
-  <a href="./docs/GETTING-STARTED.md">Getting Started</a> ·
-  <a href="./docs/MCP.md">Claude / Codex MCP Setup</a> ·
-  <a href="./docs/">Documentation</a> ·
-  <a href="./docs/THIRD-PARTY-NOTICES.md">Third-Party Notices</a>
-</p>
-
-## What Mira is
-
-Mira is a mobile research workspace for teams that need to inspect the real runtime state of their own app under authorization. It combines a browser console, built-in Relay, remote PTY, and Frida-powered inspection so AI agents and human researchers can work against the same live session.
 
 ![Claude analyzing runtime hook traces](./docs/Area.gif)
 
-## Key capabilities
+<p align="center">
+  Built for security teams that need faster evidence collection, sharper runtime verification, and more repeatable hardening workflows.
+</p>
 
-### AI-ready runtime inspection
+## Why security teams use Mira
 
-Mira exposes the actual app sandbox, ships with built-in Frida execution for Java and Native analysis, and provides `mira-mcp` so Codex or Claude can inspect a live device session through standard MCP tooling.
+- **Faster defensive feedback loops**: move from suspicion to live runtime evidence without rebuilding a separate lab flow for every verification pass.
+- **AI-accelerated hardening**: connect Codex or Claude through `mira-mcp` so researchers can turn raw observations into review steps, cases, and mitigation ideas faster.
+- **One workbench across mobile stacks**: keep Android and iOS discovery, verification, and follow-up inside the same Relay-based workflow.
+
+## Core capabilities
+
+### Live runtime risk discovery
+
+Mira exposes the actual app sandbox, ships with built-in Frida execution for Java and Native analysis, and surfaces the signals that matter for mobile defense: runtime hooks, environment fingerprints, process state, and verification evidence inside the running app.
+
+It also provides `mira-mcp`, so Codex or Claude can inspect the same live device session through standard MCP tooling.
 
 See [`docs/MCP.md`](./docs/MCP.md) for the MCP integration flow.
 
-### Android and iOS workbench
+### One defensive workbench across Android and iOS
 
-Mira integrates a BusyBox-style toolbox, Frida gadget support, and an interactive process-oriented shell view across both platforms. On iOS, the PTY and process view are adapted to the iSH compatibility layer.
+Mira integrates a BusyBox-style toolbox, Frida gadget support, and an interactive process-oriented shell view across both platforms. On iOS, the PTY and process view are adapted to the iSH compatibility layer, so the same review workflow can span both mobile stacks without splitting the tooling model.
 
 <table>
   <tr>
@@ -50,28 +46,32 @@ Mira integrates a BusyBox-style toolbox, Frida gadget support, and an interactiv
     <th align="center">iOS</th>
   </tr>
   <tr>
-    <td><img src="./docs/android-remote-frida.png" alt="Android Remote Frida" /></td>
-    <td><img src="./docs/ios-remote-frida.png" alt="iOS Remote Frida" /></td>
+    <td>
+      <img src="./docs/android-remote-frida.png" alt="Android Remote Frida" />
+      <div align="center"><sub>Remote shell and runtime inspection on Android.</sub></div>
+    </td>
+    <td>
+      <img src="./docs/ios-remote-frida.png" alt="iOS Remote Frida" />
+      <div align="center"><sub>Equivalent PTY and Frida workflow on iOS.</sub></div>
+    </td>
   </tr>
 </table>
 
-### Optional public access through Relay
+> Mira currently embeds a trimmed Frida gadget build. Injection fingerprints and occasional instability are known limitations and are being improved in future iterations.
 
-With Relay, you can temporarily expose an authorized session beyond the local network. This is useful for cloud devices, remote collaboration, or fast handoff during a live analysis session.
+### Relay-powered expert collaboration
+
+With Relay, you can temporarily expose an authorized session beyond the local network. This makes Mira practical for cloud devices, remote collaboration, expert review handoff, and fast evidence sharing when multiple people need to reason about the same live runtime state.
 
 ![Relay exposed through cpolar](./docs/public-deploy.png)
 
-### Knowledge capture for repeatable reviews
+## Defense workflow
 
-Each investigation can be turned into reusable assets: articles for process notes, cases for evidence chains, and skills for AI-assisted review flows.
-
-## Supported workflows
-
-1. Start a local or public Relay.
-2. Connect an Android or iOS Mira app instance.
-3. Open the browser console and remote PTY.
-4. Attach MCP clients such as Codex or Claude.
-5. Run Frida, shell, and runtime inspection tasks against the same authorized session.
+1. Start a local Relay with `./mira-local-web`, or expose a temporary public session with `./mira-web`.
+2. Launch the Mira app on Android or iOS and connect it to the Relay.
+3. Open the browser console and remote PTY to inspect the app's real runtime state.
+4. Attach Codex or Claude through MCP to accelerate hypothesis generation, validation, and evidence collection.
+5. Convert findings into reusable defensive review workflows, cases, and hardening follow-ups.
 
 ## Quick start
 
