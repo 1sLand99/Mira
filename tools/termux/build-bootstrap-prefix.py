@@ -15,7 +15,26 @@ from pathlib import Path
 from typing import Iterable
 
 
-TERMUX_REPO = os.environ.get("MIRA_TERMUX_REPO", "https://packages-cf.termux.dev/apt/termux-main")
+def resolve_termux_repos() -> tuple[str, ...]:
+    repos_csv = os.environ.get("MIRA_TERMUX_REPOS")
+    if repos_csv:
+        repos = tuple(repo.strip().rstrip("/") for repo in repos_csv.split(",") if repo.strip())
+        if repos:
+            return repos
+
+    explicit = os.environ.get("MIRA_TERMUX_REPO")
+    if explicit:
+        return (explicit.rstrip("/"),)
+
+    return (
+        "https://packages.termux.dev/apt/termux-main",
+        "https://grimler.se/termux-packages-24",
+        "https://packages-cf.termux.dev/apt/termux-main",
+    )
+
+
+TERMUX_REPOS = resolve_termux_repos()
+PRIMARY_TERMUX_REPO = TERMUX_REPOS[0]
 TARGET_ABI = "arm64-v8a"
 TERMUX_PREFIX_PATH = "/data/data/com.termux/files/usr"
 MIRA_PREFIX_PATH = "/data/data/com.vwww.mira/files/usr"
@@ -98,7 +117,7 @@ class PackageInfo:
 
     @property
     def url(self) -> str:
-        return f"{TERMUX_REPO}/{self.filename}"
+        return f"{PRIMARY_TERMUX_REPO}/{self.filename}"
 
 
 def log(message: str) -> None:
@@ -110,29 +129,53 @@ def run(cmd: list[str], **kwargs) -> None:
     subprocess.run(cmd, check=True, **kwargs)
 
 
-def fetch(url: str, destination: Path) -> None:
+def fetch(url: str | Iterable[str], destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if os.environ.get("MIRA_FORCE_FETCH") != "1" and destination.is_file() and destination.stat().st_size > 0:
         log(f"reuse cached file: {destination}")
         return
-    run(
-        [
-            "curl",
-            "-L",
-            "--fail",
-            "--retry",
-            "3",
-            "--continue-at",
-            "-",
-            "-o",
-            str(destination),
-            url,
-        ]
-    )
+    urls = (url,) if isinstance(url, str) else tuple(url)
+    last_error: subprocess.CalledProcessError | None = None
+    for candidate in urls:
+        log(f"fetch candidate: {candidate}")
+        try:
+            run(
+                [
+                    "curl",
+                    "-L",
+                    "--fail",
+                    "--retry",
+                    "5",
+                    "--retry-all-errors",
+                    "--retry-delay",
+                    "2",
+                    "--connect-timeout",
+                    "20",
+                    "--max-time",
+                    "180",
+                    "--continue-at",
+                    "-",
+                    "-o",
+                    str(destination),
+                    candidate,
+                ]
+            )
+            return
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            if destination.exists():
+                destination.unlink()
+            log(f"fetch failed: {candidate} (exit={exc.returncode})")
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("no candidate urls provided")
 
 
 def read_package_index() -> str:
-    fetch(f"{TERMUX_REPO}/dists/stable/main/binary-aarch64/Packages", INDEX_CACHE_PATH)
+    fetch(
+        tuple(f"{repo}/dists/stable/main/binary-aarch64/Packages" for repo in TERMUX_REPOS),
+        INDEX_CACHE_PATH,
+    )
     return INDEX_CACHE_PATH.read_text(encoding="utf-8")
 
 
@@ -560,7 +603,7 @@ def write_source_manifest(
     frida_sdist_name: str,
 ) -> None:
     lines = [
-        f"termux-repo: {TERMUX_REPO}",
+        f"termux-repos: {', '.join(TERMUX_REPOS)}",
         f"target-abi: {TARGET_ABI}",
         f"python-version: {python_version}",
         f"frida-version: {FRIDA_VERSION}",
@@ -643,7 +686,7 @@ def build(out_root: Path) -> Path:
     for package in packages:
         deb_name = Path(package.filename).name
         deb_path = DEB_CACHE_DIR / deb_name
-        fetch(package.url, deb_path)
+        fetch(tuple(f"{repo}/{package.filename}" for repo in TERMUX_REPOS), deb_path)
         extract_deb(deb_path, raw_root)
 
     prefix_source = find_raw_prefix(raw_root)
