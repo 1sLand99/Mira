@@ -7,7 +7,7 @@
 
 # Mira
 
-Turn Android and iOS runtime inspection into one AI-native defensive workflow.
+Mobile runtime detection workbench for iOS and Android.
 
 <p>
   <img src="https://img.shields.io/badge/analysis-AI--native-0f172a?style=flat-square" alt="AI-native analysis" />
@@ -20,15 +20,36 @@ Turn Android and iOS runtime inspection into one AI-native defensive workflow.
 ---
 
 <div align="center">
-  <strong>Inspect real mobile runtime state, execute live logic, and turn raw signals into repeatable hardening evidence.</strong>
+  <strong>Mira is built in the open as a long-term project for turning real runtime cases into reusable detection knowledge, analysis workflows, and cross-platform tooling.</strong>
 </div>
+
+## Why follow Mira
+
+- Mira grows with real runtime work, not just planned features.
+- Each field case can become a new workflow, tool capability, or detection note.
+- The project is designed to accumulate practical mobile runtime knowledge over time.
+- Following Mira means following how that knowledge turns into working tooling.
+
+## Research Updates
+
+Mira is developed in public and updated across multiple channels.
+
+Different platforms carry different parts of the work:
+
+- GitHub for the main project record
+- Articles for full case write-ups
+- Community posts for focused technical sharing
+- Short updates for demos, progress, and smaller discoveries
+
+> Next updates will resume after the early May 2026 holiday break. Happy International Workers' Day to everyone celebrating.
 
 ## Features
 
-- 🧩 **Third-party app sandbox shell**: Enter the real permission sandbox of target apps with a consistent Android and iOS experience.
-- 🤖 **Built for AI**: Let AI operate like a user inside the third-party permission sandbox to explore risk paths.
-- ⚡ **Arbitrary runtime execution**: Execute arbitrary Java and Native logic, or use JavaScript to construct objects and call non-exported methods.
-- ♾️ **Persistent risk intelligence**: Turn one real finding into reusable knowledge and repeatable future discovery.
+- 🧩 **Real app sandbox access**: Drop directly into the true permission sandbox of target apps with one consistent Android and iOS workflow.
+- 🤖 **Built for AI operators**: Let AI inspect, navigate, and reason inside the live app runtime like a hands-on analyst.
+- ⚡ **Live runtime execution**: Run Java, Native, and Frida-driven logic on demand to verify signals instead of guessing from static traces.
+- 🚀 **Fast to first result**: Start Relay, install the app, and get to shell, screen, and runtime evidence in minutes.
+- ♾️ **Compounding detection intelligence**: Turn one real finding into reusable detection patterns and repeatable hardening wins.
 
 ## Getting Started
 
