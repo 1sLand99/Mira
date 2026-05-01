@@ -11,6 +11,22 @@ private let miraScreenFrameRate: Int32 = 10
 private let miraScreenMaxWidth = 540
 private let miraScreenBitrate = 220_000
 
+@MainActor
+private func miraCurrentDeviceNameOnMainActor() -> String {
+    UIDevice.current.name
+}
+
+private func miraCurrentDeviceName() -> String {
+    if Thread.isMainThread {
+        return MainActor.assumeIsolated {
+            UIDevice.current.name
+        }
+    }
+    return DispatchQueue.main.sync {
+        miraCurrentDeviceNameOnMainActor()
+    }
+}
+
 private func miraRelayDeviceLog(level: String = "INFO", scope: String, message: String, details: [String: Any] = [:]) {
     let installId = MiraNativeStatus.installId
     guard !installId.isEmpty else { return }
@@ -337,7 +353,7 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
             "type": "screen.video.info",
             "protocol": 1,
             "installId": installId,
-            "deviceName": UIDevice.current.name,
+            "deviceName": miraCurrentDeviceName(),
             "codec": codecString,
             "mime": "video/avc",
             "format": "annexb",
@@ -543,7 +559,7 @@ final class MiraDeviceMetricsSampler: @unchecked Sendable {
             "type": "device.metrics",
             "protocol": 1,
             "installId": installId,
-            "deviceName": UIDevice.current.name,
+            "deviceName": miraCurrentDeviceName(),
             "state": "idle",
             "metrics": [
                 "sampledAt": nowMs,
@@ -571,6 +587,7 @@ final class MiraDeviceMetricsSampler: @unchecked Sendable {
             max(0, Double(total.tx >= last.tx ? total.tx - last.tx : 0) / seconds)
         )
     }
+
 }
 
 @MainActor

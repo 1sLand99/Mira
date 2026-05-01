@@ -14,6 +14,7 @@ apps/console/out/
 venv/
 __pycache__/
 *.pyc
+*.egg-info/
 
 .mira/tmp/
 .mira/runtime/

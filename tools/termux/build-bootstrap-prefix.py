@@ -15,7 +15,26 @@ from pathlib import Path
 from typing import Iterable
 
 
-TERMUX_REPO = os.environ.get("MIRA_TERMUX_REPO", "https://packages-cf.termux.dev/apt/termux-main")
+def resolve_termux_repos() -> tuple[str, ...]:
+    repos_csv = os.environ.get("MIRA_TERMUX_REPOS")
+    if repos_csv:
+        repos = tuple(repo.strip().rstrip("/") for repo in repos_csv.split(",") if repo.strip())
+        if repos:
+            return repos
+
+    explicit = os.environ.get("MIRA_TERMUX_REPO")
+    if explicit:
+        return (explicit.rstrip("/"),)
+
+    return (
+        "https://packages.termux.dev/apt/termux-main",
+        "https://grimler.se/termux-packages-24",
+        "https://packages-cf.termux.dev/apt/termux-main",
+    )
+
+
+TERMUX_REPOS = resolve_termux_repos()
+PRIMARY_TERMUX_REPO = TERMUX_REPOS[0]
 TARGET_ABI = "arm64-v8a"
 TERMUX_PREFIX_PATH = "/data/data/com.termux/files/usr"
 MIRA_PREFIX_PATH = "/data/data/com.vwww.mira/files/usr"
@@ -43,12 +62,50 @@ ANDROID_SDK_ROOT = Path(os.environ.get("ANDROID_SDK_ROOT", str(Path.home() / "Li
 ANDROID_NDK_ROOT = Path(
     os.environ.get("ANDROID_NDK_ROOT", str(ANDROID_SDK_ROOT / "ndk" / os.environ.get("MIRA_NDK_VERSION", "29.0.14206865")))
 ).expanduser()
-TOOLCHAIN_DIR = ANDROID_NDK_ROOT / "toolchains" / "llvm" / "prebuilt" / "darwin-x86_64" / "bin"
 FRIDA_DEVKIT_DIR = ROOT_DIR / "build" / "frida" / "devkit" / FRIDA_VERSION / "android-arm64"
 FRIDA_DEVKIT_TAR = FRIDA_DEVKIT_DIR / f"frida-core-devkit-{FRIDA_VERSION}-android-arm64.tar.xz"
 FRIDA_DEVKIT_URL = (
     f"https://github.com/frida/frida/releases/download/{FRIDA_VERSION}/frida-core-devkit-{FRIDA_VERSION}-android-arm64.tar.xz"
 )
+
+
+def resolve_toolchain_dir() -> Path:
+    explicit = os.environ.get("MIRA_ANDROID_NDK_TOOLCHAIN_DIR")
+    if explicit:
+        return Path(explicit).expanduser()
+
+    prebuilt_root = ANDROID_NDK_ROOT / "toolchains" / "llvm" / "prebuilt"
+    candidates: list[Path] = []
+
+    platform = sys.platform
+    machine = os.uname().machine if hasattr(os, "uname") else ""
+    if platform == "darwin":
+        if machine in {"arm64", "aarch64"}:
+            candidates.extend(
+                [
+                    prebuilt_root / "darwin-arm64" / "bin",
+                    prebuilt_root / "darwin-x86_64" / "bin",
+                ]
+            )
+        else:
+            candidates.append(prebuilt_root / "darwin-x86_64" / "bin")
+    elif platform.startswith("linux"):
+        candidates.append(prebuilt_root / "linux-x86_64" / "bin")
+    else:
+        candidates.append(prebuilt_root / "windows-x86_64" / "bin")
+
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+
+    for candidate in sorted(prebuilt_root.glob("*/bin")):
+        if candidate.is_dir():
+            return candidate
+
+    raise FileNotFoundError(f"缺少 Android NDK toolchain 目录: {prebuilt_root}")
+
+
+TOOLCHAIN_DIR = resolve_toolchain_dir()
 
 
 @dataclass(frozen=True)
@@ -60,7 +117,7 @@ class PackageInfo:
 
     @property
     def url(self) -> str:
-        return f"{TERMUX_REPO}/{self.filename}"
+        return f"{PRIMARY_TERMUX_REPO}/{self.filename}"
 
 
 def log(message: str) -> None:
@@ -72,29 +129,53 @@ def run(cmd: list[str], **kwargs) -> None:
     subprocess.run(cmd, check=True, **kwargs)
 
 
-def fetch(url: str, destination: Path) -> None:
+def fetch(url: str | Iterable[str], destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if os.environ.get("MIRA_FORCE_FETCH") != "1" and destination.is_file() and destination.stat().st_size > 0:
         log(f"reuse cached file: {destination}")
         return
-    run(
-        [
-            "curl",
-            "-L",
-            "--fail",
-            "--retry",
-            "3",
-            "--continue-at",
-            "-",
-            "-o",
-            str(destination),
-            url,
-        ]
-    )
+    urls = (url,) if isinstance(url, str) else tuple(url)
+    last_error: subprocess.CalledProcessError | None = None
+    for candidate in urls:
+        log(f"fetch candidate: {candidate}")
+        try:
+            run(
+                [
+                    "curl",
+                    "-L",
+                    "--fail",
+                    "--retry",
+                    "5",
+                    "--retry-all-errors",
+                    "--retry-delay",
+                    "2",
+                    "--connect-timeout",
+                    "20",
+                    "--max-time",
+                    "180",
+                    "--continue-at",
+                    "-",
+                    "-o",
+                    str(destination),
+                    candidate,
+                ]
+            )
+            return
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            if destination.exists():
+                destination.unlink()
+            log(f"fetch failed: {candidate} (exit={exc.returncode})")
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("no candidate urls provided")
 
 
 def read_package_index() -> str:
-    fetch(f"{TERMUX_REPO}/dists/stable/main/binary-aarch64/Packages", INDEX_CACHE_PATH)
+    fetch(
+        tuple(f"{repo}/dists/stable/main/binary-aarch64/Packages" for repo in TERMUX_REPOS),
+        INDEX_CACHE_PATH,
+    )
     return INDEX_CACHE_PATH.read_text(encoding="utf-8")
 
 
@@ -522,7 +603,7 @@ def write_source_manifest(
     frida_sdist_name: str,
 ) -> None:
     lines = [
-        f"termux-repo: {TERMUX_REPO}",
+        f"termux-repos: {', '.join(TERMUX_REPOS)}",
         f"target-abi: {TARGET_ABI}",
         f"python-version: {python_version}",
         f"frida-version: {FRIDA_VERSION}",
@@ -605,7 +686,7 @@ def build(out_root: Path) -> Path:
     for package in packages:
         deb_name = Path(package.filename).name
         deb_path = DEB_CACHE_DIR / deb_name
-        fetch(package.url, deb_path)
+        fetch(tuple(f"{repo}/{package.filename}" for repo in TERMUX_REPOS), deb_path)
         extract_deb(deb_path, raw_root)
 
     prefix_source = find_raw_prefix(raw_root)
