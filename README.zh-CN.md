@@ -3,7 +3,7 @@
 </p>
 
 <div align="center">
-  <img src="./docs/mira-readme-icon-round.png" alt="Mira icon" width="180" />
+  <img src="./docs/mira-readme-icon-round.png" alt="Mira icon" width="138" />
 
 # Mira
 
@@ -25,10 +25,10 @@
 
 ## Features
 
-- **双端统一运行时工作台**: 用同一套 Relay 工作台覆盖 Android 与 iOS, 不再拆成两套割裂分析链路.
-- **AI 辅助分析**: 通过 `mira-mcp` 接入 Codex 或 Claude, 让 AI 与研究者查看同一个实时设备会话.
-- **Java 与 Native 动态执行**: 直接在目标 App 运行时中执行 Frida 逻辑, 更快验证假设.
-- **面向防护的证据采集**: 暴露 hook 痕迹, 环境指纹, 进程状态, PTY 输出和运行时验证信号, 服务于移动加固与风险复核.
+- 🧩 **三方 App 沙箱 shell 工作台**: 直接进入目标 App 的真实权限沙箱, 并提供一致的 Android 与 iOS 体验.
+- 🤖 **为 AI 构建**: 让 AI 如同用户一样在第三方权限沙箱内操作与探索风险.
+- ⚡ **任意运行时逻辑执行**: 支持执行任意 Java 与 Native 层逻辑, 也可通过 JavaScript 构造对象并调用未导出方法.
+- ♾️ **持续沉淀风险情报**: 把一次真实发现沉淀为可复用经验, 转化为可重复触发的后续发现能力.
 
 ## Getting Started
 

@@ -3,7 +3,7 @@
 </p>
 
 <div align="center">
-  <img src="./docs/mira-readme-icon-round.png" alt="Mira icon" width="180" />
+  <img src="./docs/mira-readme-icon-round.png" alt="Mira icon" width="138" />
 
 # Mira
 
@@ -25,10 +25,10 @@ Turn Android and iOS runtime inspection into one AI-native defensive workflow.
 
 ## Features
 
-- **Cross-platform runtime workspace**: Use one Relay-based workbench across Android and iOS instead of splitting research into separate toolchains.
-- **AI-assisted analysis**: Connect Codex or Claude through `mira-mcp` so AI can inspect the same live device session as the researcher.
-- **Live Java and Native execution**: Run Frida-backed logic directly inside the target app runtime and validate hypotheses without leaving the session.
-- **Defense-oriented evidence collection**: Surface hook traces, environment fingerprints, process state, PTY output, and verification signals relevant to mobile hardening.
+- 🧩 **Third-party app sandbox shell**: Enter the real permission sandbox of target apps with a consistent Android and iOS experience.
+- 🤖 **Built for AI**: Let AI operate like a user inside the third-party permission sandbox to explore risk paths.
+- ⚡ **Arbitrary runtime execution**: Execute arbitrary Java and Native logic, or use JavaScript to construct objects and call non-exported methods.
+- ♾️ **Persistent risk intelligence**: Turn one real finding into reusable knowledge and repeatable future discovery.
 
 ## Getting Started
 
