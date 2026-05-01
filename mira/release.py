@@ -266,9 +266,13 @@ def build_ios(args: argparse.Namespace) -> BuildResult:
     if destination_mode == "device" and not device_id:
         raise ReleaseError("未检测到可用 iOS 真机. 请通过 --ios-device-id 或 MIRA_IOS_DEVICE_ID 指定 UDID, 或改用 --ios-destination-mode generic.")
 
+    app_path = Path(args.ios_app_path)
+    rootfs_output = app_path / "MiraISHRoot.fakefs"
+
     env = os.environ.copy()
     env.pop("LIBRARY_PATH", None)
     env.pop("SDKROOT", None)
+    env.setdefault("MIRA_ISH_ROOTFS_OUTPUT", str(rootfs_output))
     command = [
         "xcodebuild",
         "-project",
@@ -310,7 +314,6 @@ def build_ios(args: argparse.Namespace) -> BuildResult:
     run_command(command, cwd=ROOT_DIR, env=env, dry_run=args.dry_run)
 
     artifacts: list[ArtifactRecord] = []
-    app_path = Path(args.ios_app_path)
     if not args.dry_run:
         if not app_path.is_dir():
             raise ReleaseError(f"iOS .app 产物缺失: {app_path}")
@@ -324,6 +327,7 @@ def build_ios(args: argparse.Namespace) -> BuildResult:
             "deviceId": device_id,
             "derivedDataPath": str(args.ios_derived_data),
             "appPath": str(app_path),
+            "rootfsOutput": str(rootfs_output),
             "distDir": str(IOS_DIST_DIR),
         },
     )

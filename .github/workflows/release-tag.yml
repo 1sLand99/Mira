@@ -72,6 +72,8 @@ jobs:
           MIRA_ISH_BUILD_DIR="$PWD/build/ios-ish-device-libs" \
           bash ./tools/ios/build-ish-libs.sh
           bash ./tools/ios/build-frida-musl-devkit.sh
+          MIRA_ISH_ROOTFS_OUTPUT="$PWD/build/ios-mira-device-native-relay-derived/Build/Products/Debug-iphoneos/Mira.app/MiraISHRoot.fakefs" \
+          bash ./tools/ios/prepare-ish-rootfs.sh
 
       - name: Build iOS unsigned IPA with generic iphoneos destination
         run: |
