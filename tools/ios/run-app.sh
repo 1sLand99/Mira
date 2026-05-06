@@ -7,8 +7,13 @@ SCHEME="${MIRA_IOS_SCHEME:-Mira}"
 DEVICE_NAME="${MIRA_IOS_DEVICE:-iPhone 17 Pro}"
 TARGET="${MIRA_IOS_TARGET:-auto}"
 BUNDLE_ID="${MIRA_IOS_BUNDLE_ID:-com.vwww.mira.ios}"
-AUTO_LAUNCH_DEVICE="${MIRA_IOS_AUTO_LAUNCH_DEVICE:-0}"
+AUTO_LAUNCH_DEVICE="${MIRA_IOS_AUTO_LAUNCH_DEVICE:-1}"
+AUTO_OPEN_RELAY_CONSOLE="${MIRA_IOS_AUTO_OPEN_RELAY_CONSOLE:-1}"
+AUTO_START_LOCAL_RELAY="${MIRA_IOS_AUTO_START_LOCAL_RELAY:-1}"
 AUTO_CONNECT_RELAY_URL="${MIRA_IOS_RELAY_URL:-}"
+HOST_RELAY_PORT="${MIRA_IOS_HOST_RELAY_PORT:-8765}"
+RELAY_LOG_PATH="${MIRA_IOS_RELAY_LOG_PATH:-${ROOT_DIR}/build/mira-local-relay.log}"
+OPEN_URL="${MIRA_IOS_OPEN_URL:-http://127.0.0.1:${HOST_RELAY_PORT}}"
 SIM_DERIVED_DATA="${MIRA_IOS_SIM_DERIVED_DATA:-${ROOT_DIR}/build/ios/DerivedData}"
 SIM_APP_PATH="${SIM_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/Mira.app"
 DEVICE_DERIVED_DATA="${MIRA_IOS_DEVICE_DERIVED_DATA:-${ROOT_DIR}/build/ios-mira-device-native-relay-derived}"
@@ -28,8 +33,13 @@ Environment variables:
   MIRA_IOS_TARGET       auto, device, or simulator. Default auto
   MIRA_IOS_DEVICE_ID    physical device UDID. If empty, first USB device from ios-deploy is used
   MIRA_IOS_DEPLOY       ios-deploy executable path. Default local build/ios-tools, then PATH
-  MIRA_IOS_AUTO_LAUNCH_DEVICE  1 to auto launch after physical-device install. Default 0
-  MIRA_IOS_RELAY_URL    Relay URL to inject at launch time for automated connect
+  MIRA_IOS_AUTO_LAUNCH_DEVICE  1 to auto launch after physical-device install. Default 1
+  MIRA_IOS_AUTO_OPEN_RELAY_CONSOLE  1 to open Relay console on computer. Default 1
+  MIRA_IOS_AUTO_START_LOCAL_RELAY   1 to auto-start ./mira-local-web when localhost relay is missing. Default 1
+  MIRA_IOS_RELAY_URL    Relay URL to inject at launch time for automated connect. Default http://<host-lan-ip>:8765
+  MIRA_IOS_HOST_RELAY_PORT Relay port for local relay and browser. Default 8765
+  MIRA_IOS_RELAY_LOG_PATH Log file for auto-started local relay
+  MIRA_IOS_OPEN_URL     Browser URL to open on this computer. Default http://127.0.0.1:<relay-port>
   MIRA_IOS_DEVICE       Simulator device name. Default iPhone 17 Pro
   MIRA_IOS_SCHEME       Xcode scheme. Default Mira
   MIRA_IOS_BUNDLE_ID    Bundle identifier. Default com.vwww.mira.ios
@@ -66,6 +76,127 @@ if [[ ! -d "${PROJECT_PATH}" ]]; then
   echo "Missing iOS project: ${PROJECT_PATH}" >&2
   exit 1
 fi
+
+open_url() {
+  local url="$1"
+  if [[ -z "${url}" ]]; then
+    return 0
+  fi
+  open "${url}" >/dev/null 2>&1 || true
+}
+
+detect_host_lan_ip() {
+  local iface=""
+  local ip=""
+
+  if command -v route >/dev/null 2>&1; then
+    iface="$(route get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+  fi
+
+  if [[ -n "${iface}" ]] && command -v ipconfig >/dev/null 2>&1; then
+    ip="$(ipconfig getifaddr "${iface}" 2>/dev/null || true)"
+    if [[ -n "${ip}" ]]; then
+      printf '%s\n' "${ip}"
+      return 0
+    fi
+  fi
+
+  python3 - <<'PY'
+import ipaddress
+import subprocess
+
+ips = []
+try:
+    data = subprocess.run(["ifconfig"], capture_output=True, text=True, check=False).stdout
+    for line in data.splitlines():
+        line = line.strip()
+        if not line.startswith("inet "):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        ip = parts[1]
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        if addr.version == 4 and not addr.is_loopback and not addr.is_link_local:
+            ips.append(ip)
+except Exception:
+    pass
+
+private = []
+for ip in ips:
+    try:
+        if ipaddress.ip_address(ip).is_private:
+            private.append(ip)
+    except ValueError:
+        pass
+
+if private:
+    print(private[0])
+elif ips:
+    print(ips[0])
+PY
+}
+
+is_local_relay_ready() {
+  python3 - "$1" <<'PY'
+import sys
+import urllib.request
+
+port = sys.argv[1]
+for host in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
+    try:
+        with urllib.request.urlopen(host + "/api/devices", timeout=1.5) as r:
+            if r.status == 200:
+                sys.exit(0)
+    except Exception:
+        pass
+sys.exit(1)
+PY
+}
+
+start_local_relay_if_needed() {
+  if is_local_relay_ready "${HOST_RELAY_PORT}"; then
+    return 0
+  fi
+
+  if [[ "${AUTO_START_LOCAL_RELAY}" != "1" ]]; then
+    echo "Relay is not running on 127.0.0.1:${HOST_RELAY_PORT}. Start ./mira-local-web first or enable MIRA_IOS_AUTO_START_LOCAL_RELAY=1." >&2
+    exit 1
+  fi
+
+  echo "Starting local relay via ./mira-local-web ..."
+  mkdir -p "$(dirname "${RELAY_LOG_PATH}")"
+  (
+    cd "${ROOT_DIR}"
+    nohup env MIRA_RELAY_PORT="${HOST_RELAY_PORT}" ./mira-local-web >"${RELAY_LOG_PATH}" 2>&1 &
+  )
+
+  local i
+  for i in {1..60}; do
+    if is_local_relay_ready "${HOST_RELAY_PORT}"; then
+      echo "Local relay is ready on http://127.0.0.1:${HOST_RELAY_PORT}"
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Local relay did not become ready. Check ${RELAY_LOG_PATH}" >&2
+  exit 1
+}
+
+if [[ -z "${AUTO_CONNECT_RELAY_URL}" ]]; then
+  HOST_LAN_IP="$(detect_host_lan_ip)"
+  if [[ -z "${HOST_LAN_IP}" ]]; then
+    echo "Unable to detect host LAN IP. Set MIRA_IOS_RELAY_URL manually." >&2
+    exit 1
+  fi
+  AUTO_CONNECT_RELAY_URL="http://${HOST_LAN_IP}:${HOST_RELAY_PORT}"
+fi
+
+start_local_relay_if_needed
 
 ensure_ios_deploy() {
   if [[ -n "${MIRA_IOS_DEPLOY:-}" ]]; then
@@ -350,6 +481,10 @@ App: ${DEVICE_APP_PATH}
 Note: ${launch_note}
 
 MSG
+
+  if [[ "${AUTO_OPEN_RELAY_CONSOLE}" == "1" ]]; then
+    open_url "${OPEN_URL}"
+  fi
 }
 
 run_simulator() {
@@ -388,6 +523,10 @@ Bundle: ${BUNDLE_ID}
 App: ${SIM_APP_PATH}
 
 MSG
+
+  if [[ "${AUTO_OPEN_RELAY_CONSOLE}" == "1" ]]; then
+    open_url "${OPEN_URL}"
+  fi
 }
 
 case "${TARGET}" in
