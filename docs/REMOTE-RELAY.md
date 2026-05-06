@@ -1,283 +1,126 @@
+<p align="right">
+  English | <a href="./REMOTE-RELAY.zh-CN.md">简体中文</a>
+</p>
+
 # Remote On-Demand Terminal
 
-## 目标
+## Goal
 
-Remote On-Demand Terminal(按需远程终端) 现在采用手机主动连接 Relay Server(中继服务端) 的模式。
+Remote On-Demand Terminal now uses a phone-initiated connection to Relay Server.
 
-主路径不再依赖 Scan LAN(局域网扫描), 也不做二维码扫码。电脑启动 Relay 后生成一个 URL, Android App(安卓应用) 首页只需要填写这个 URL 并点击 Connect Relay(连接中继)。浏览器只有在用户点击 Open Terminal(打开终端) 后才会触发手机创建 PTY(伪终端)。
+The main path no longer depends on LAN scanning or QR codes. After the desktop starts Relay, it produces a URL. The Android app home screen only needs that URL and a tap on `Connect Relay`. The browser triggers PTY creation only after the user clicks `Open Terminal`.
 
-本阶段继续保持最小闭环:
+This phase keeps a minimal closed loop:
 
-1. Android 只维护轻量 control WebSocket(控制长连接), 不提前创建 PTY。
-2. 浏览器打开 Relay Console(中继控制台), 自动看到已经连接的设备。
-3. 用户点击 Open Terminal 后, Relay 通过 control 通道下发 session.open。
-4. Android 创建真实 PTY, 启动 shell(命令解释器), 再连接 `/ws/device`。
-5. 浏览器连接 `/ws/browser`, 输入和输出都经过 Relay 转发。
-6. Close Session 后关闭 PTY 和 device WebSocket, control 通道继续保持 idle(空闲) 状态。
+1. Android only keeps a lightweight control WebSocket and does not create PTY sessions in advance.
+2. The browser opens Relay Console and immediately sees connected devices.
+3. After the user clicks `Open Terminal`, Relay sends `session.open` through the control channel.
+4. Android creates a real PTY, launches the shell, and connects to `/ws/device`.
+5. The browser connects to `/ws/browser`, and Relay forwards both input and output.
+6. After `Close Session`, the PTY and device WebSocket close, while the control channel stays idle.
 
-## 一键公网启动
+## One-command public startup
 
-本机需要先安装并认证 cpolar(国内内网穿透服务)。macOS(苹果桌面系统)可以使用官网下载的可执行文件, 也可以通过 Homebrew(包管理工具)安装:
+Install and authenticate `cpolar` on the local machine first. On macOS, you can use the official binary or Homebrew:
 
 ```bash
 brew tap probezy/core && brew install cpolar
 cpolar authtoken <YOUR_AUTH_TOKEN>
 ```
 
-`<YOUR_AUTH_TOKEN>` 在 `https://dashboard.cpolar.com/get-started` 获取, 不要提交到仓库或聊天记录。
+Get `<YOUR_AUTH_TOKEN>` from `https://dashboard.cpolar.com/get-started`. Do not commit it into the repository or paste it into shared chat logs.
 
-启动:
+Start the public relay path:
 
 ```bash
 ./tools/relay/start-public-relay.sh
 ```
 
-脚本会自动:
+The script will:
 
-1. 先启动本地 Mira Relay。
-2. 启动 cpolar HTTP(网页协议) 隧道。
-3. 等 cpolar 输出的 `https://*.cpolar.top` 地址通过 HTTP(网页请求) 校验。
-4. 用这个地址更新 Mira Relay 的公网地址。
-5. 打印 Browser URL 和 Android Relay URL。
+1. Start the local Mira Relay first.
+2. Start a cpolar HTTP tunnel.
+3. Wait until the `https://*.cpolar.top` address passes HTTP validation.
+4. Update Mira Relay with that public address.
+5. Print the Browser URL and Android Relay URL.
 
-手机端填写脚本打印的 Android Relay URL, 不需要 Scan LAN, 不需要二维码。
+Enter the printed Android Relay URL on the phone. No LAN scan and no QR code are needed.
 
-可选环境变量:
+Optional environment variables:
 
 ```bash
 MIRA_RELAY_PORT=8765 ./tools/relay/start-public-relay.sh
 MIRA_RELAY_HOST=127.0.0.1 ./tools/relay/start-public-relay.sh
 ```
 
-如果仍然想使用 Cloudflare Quick Tunnel(Cloudflare 临时隧道), 可以显式指定:
+If you still want Cloudflare Quick Tunnel, set it explicitly:
 
 ```bash
 MIRA_TUNNEL_PROVIDER=cloudflare ./tools/relay/start-public-relay.sh
 ```
 
-## 使用外部公网隧道
+## Using an external public tunnel
 
-如果你已经在另一个终端里手动运行 cpolar, frp(快速反向代理工具), NATAPP(内网穿透服务) 或其他服务, 可以把本机 `8765` 端口映射到公网后交给 Mira 复用。
+If you already run cpolar, frp, NATAPP, or another tunneling service in a separate terminal, you can map local port `8765` to a public endpoint and let Mira reuse it.
 
-拿到公网地址后, 通过 `MIRA_PUBLIC_URL` 交给 Mira:
+After you get the public URL, pass it to Mira through `MIRA_PUBLIC_URL`:
 
 ```bash
 MIRA_PUBLIC_URL=https://example.cpolar.top ./mira-web
 ```
 
-这种模式下脚本会:
+In this mode the script will:
 
-1. 启动本地 Mira Relay。
-2. 等待 `MIRA_PUBLIC_URL` 可以访问到本地 Relay。
-3. 跳过自动启动 cpolar。
-4. 把 `MIRA_PUBLIC_URL` 打印为 Browser URL 和 Android Relay URL。
+1. Start the local Mira Relay.
+2. Wait until `MIRA_PUBLIC_URL` can reach the local Relay.
+3. Skip automatic cpolar startup.
+4. Print `MIRA_PUBLIC_URL` as both the Browser URL and Android Relay URL.
 
-### cpolar 快速尝试
+### Quick cpolar trial
 
-安装和认证按 cpolar 官网文档完成后, 可以先单独启动隧道:
+After installation and authentication, you can start the tunnel separately first:
 
 ```bash
 cpolar http 8765
 ```
 
-复制 cpolar 输出的公网 HTTP 或 HTTPS 地址, 例如:
+Copy the public HTTP or HTTPS address printed by cpolar, for example:
 
 ```text
 https://xxxx.r36.cpolar.top
 ```
 
-再启动 Mira:
+Then start Mira:
 
 ```bash
 MIRA_PUBLIC_URL=https://xxxx.r36.cpolar.top ./mira-web
 ```
 
-保持 cpolar 进程和 `./mira-web` 同时运行。手机端填写 Mira 打印的 Android Relay URL。
+Keep both the cpolar process and `./mira-web` running. On the phone, enter the Android Relay URL printed by Mira.
 
-默认 `./mira-web` 会自己管理 cpolar 进程。如果已经手动运行 `cpolar http 8765`, 推荐使用 `MIRA_PUBLIC_URL` 方式, 避免重复启动 cpolar。
+By default, `./mira-web` manages the cpolar process itself. If you already ran `cpolar http 8765` manually, prefer the `MIRA_PUBLIC_URL` path to avoid starting cpolar twice.
 
-## 局域网启动
+## LAN startup
 
-如果只在局域网测试, 优先使用本地启动脚本:
+If you only test within the local network, prefer:
 
 ```bash
 ./mira-local-web
 ```
 
-脚本会自动打印两个地址:
+The script prints two addresses:
 
 ```text
 Browser URL: http://localhost:8765
-Android Relay URL: http://<电脑局域网IP>:8765
+Android Relay URL: http://<your-lan-ip>:8765
 ```
 
-电脑浏览器应该打开 `Browser URL`, 也就是 `localhost` 地址。这样 WebCodecs(网页编解码接口) 可以在 localhost secure context(本机安全上下文) 中启用, 远程画面 H.264(视频编码格式) 解码才可用。
+Open the `Browser URL` on the desktop, which should be the `localhost` address. This keeps WebCodecs available inside a localhost secure context so H.264 decoding for the remote view can work.
 
-Android App(安卓应用) 首页填写 `Android Relay URL`, 也就是电脑局域网 IP(网络地址)。手机不能填写 `localhost`, 因为手机上的 localhost 指向手机自己。
+On the Android app home screen, enter the `Android Relay URL`, which uses the desktop LAN IP. Do not enter `localhost` on the phone, because phone localhost points to the phone itself.
 
-如果需要手动启动 Relay, 可以直接运行:
+If you need to start Relay manually, you can run the Python module entry point directly.
 
-```bash
-python3 -m mira.relay.server \
-  --host 0.0.0.0 \
-  --port 8765 \
-  --advertise-url http://<电脑局域网IP>:8765
-```
+## Toolbox release timing
 
-浏览器打开:
-
-```text
-http://<电脑局域网IP>:8765
-```
-
-手机端填写同一个地址:
-
-```text
-http://<电脑局域网IP>:8765
-```
-
-## Android 端使用
-
-1. 安装并打开 Mira APK(安卓安装包)。
-2. 首页填写:
-   ```text
-   Relay URL: Relay Console 显示的地址
-   ```
-3. 点击 `Connect Relay`。
-4. 浏览器设备列表出现手机后, 点击 `Open Terminal`。
-5. 需要退出时点击 `Close Session`, 或在手机上点击 `Disconnect`。
-
-手机首页不再展示 Local Terminal(本地终端) 入口, 当前主路径只保留远程 Relay 连接。
-
-## 协议概览
-
-### 设备注册
-
-Android 连接:
-
-```text
-/ws/control
-```
-
-首帧发送:
-
-```json
-{
-  "type": "device.register",
-  "protocol": 1,
-  "installId": "uuid",
-  "deviceName": "Pixel 4",
-  "packageName": "com.vwww.mira",
-  "androidIdHash": "sha256:...",
-  "model": "Pixel 4",
-  "sdk": 30,
-  "arch": "arm64-v8a",
-  "state": "idle",
-  "transport": "control"
-}
-```
-
-服务端回复:
-
-```json
-{"type":"control.ready","protocol":1,"installId":"uuid"}
-```
-
-### 按需打开终端
-
-浏览器点击 Open Terminal 后, Relay 通过 `/ws/control` 发给 Android:
-
-```json
-{
-  "type": "session.open",
-  "protocol": 1,
-  "installId": "uuid",
-  "sessionId": "server-generated-uuid",
-  "serverWs": "wss://example.trycloudflare.com/ws/device",
-  "cols": 120,
-  "rows": 36
-}
-```
-
-Android 创建 PTY 后连接 `/ws/device`:
-
-```json
-{"type":"device.attach","protocol":1,"installId":"uuid","sessionId":"uuid"}
-```
-
-浏览器连接 `/ws/browser`:
-
-```json
-{"type":"browser.attach","protocol":1,"installId":"uuid","sessionId":"uuid"}
-```
-
-终端数据使用 JSON(JSON 数据格式) + base64(二进制文本编码):
-
-```json
-{"type":"terminal.input","sessionId":"uuid","dataBase64":"cHdkCg=="}
-{"type":"terminal.output","sessionId":"uuid","dataBase64":"..."}
-{"type":"terminal.resize","sessionId":"uuid","cols":120,"rows":36}
-{"type":"session.close","sessionId":"uuid"}
-```
-
-## 会话工具箱
-
-设备收到 session.open 后会在创建 PTY 前准备 Mira Toolbox(工具箱):
-
-```text
-/data/user/0/com.vwww.mira/cache/mira-sessions/<sessionId>/bin/busybox
-```
-
-随后将工具目录放到 PATH(命令搜索路径) 前面:
-
-```text
-PATH=/data/user/0/com.vwww.mira/cache/mira-sessions/<sessionId>/bin:$PREFIX/bin:/system/bin:/system/xbin
-```
-
-会话关闭后, Android 会删除该 session 工具目录。详细说明见 `TOOLBOX.md`.
-
-## 设备身份
-
-Android 首次启动会生成并保存:
-
-```text
-installId = UUID.randomUUID()
-deviceSecret = 32 bytes random
-```
-
-当前阶段:
-
-1. `installId` 作为设备安装身份, 不是鉴权令牌。
-2. `sessionId` 作为服务端生成的会话标识, 用来绑定本次 PTY 会话。
-3. `deviceSecret` 只生成保存, 不外发, 不参与当前协议, HMAC(基于哈希的消息认证码) 留到后续。
-4. `androidIdHash` 只作为辅助展示字段。
-
-## 验收命令
-
-远程终端打开后输入:
-
-```sh
-pwd
-echo hello
-busybox echo busybox-ok
-command -v busybox
-cat /proc/self/mountinfo | head
-```
-
-预期:
-
-1. 输出来自手机真实 PTY。
-2. 浏览器刷新后可以回放最近 1 MiB session 输出。
-3. Close Session 后设备断开 `/ws/device` 并关闭 PTY。
-4. `/ws/control` 保持连接, 设备状态回到 idle。
-5. `busybox` 来自 `cache/mira-sessions/<sessionId>/bin`。
-
-## 当前边界
-
-1. 不做 Scan LAN 主路径, 旧 `/api/discover` 只作为兼容兜底保留。
-2. 不做二维码扫码。
-3. 每台设备同一时间只允许一个 active session。
-4. 不实现 apt(包管理器), AI Agent(智能体) 自动执行或服务端动态工具包下发。
-5. 本阶段不使用共享令牌, 默认依赖企业自部署服务端边界。后续企业认证可接账号, 证书或 HMAC。
-6. 手机首页不暴露 Local Terminal(本地终端) 入口, 后续如需恢复只作为开发调试能力处理。
-7. BusyBox 当前内置 arm64-v8a, armeabi-v7a, x86 和 x86_64 四个 ABI 版本, 但不提供 apt 或动态工具包下发。
+The toolbox is released only when a remote session opens, not when the device first connects. See `TOOLBOX.md` for details.

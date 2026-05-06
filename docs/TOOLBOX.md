@@ -1,77 +1,81 @@
+<p align="right">
+  English | <a href="./TOOLBOX.zh-CN.md">简体中文</a>
+</p>
+
 # Mira Toolbox
 
-## 目标
+## Goal
 
-Mira Toolbox(工具箱) 用来替代 Termux package repository(包仓库) 的第一阶段方案。
+Mira Toolbox is the first-stage replacement for the Termux package repository path.
 
-本阶段不接 apt(包管理器), 不维护软件源索引, 也不从 Termux 包仓库安装工具。APK(安卓安装包) 直接内置 BusyBox(单文件工具集), 每次远程 terminal session(终端会话) 打开时释放到应用 cache(缓存目录) 的会话目录, 会话关闭后删除。
+This phase does not use `apt`, does not maintain a package index, and does not install tools from the Termux repository. Instead, the APK packages BusyBox directly. Every remote terminal session releases BusyBox into a session directory under the app cache and removes it when the session closes.
 
-## 当前打包内容
+## Current packaged contents
 
-当前内置四个 Android ABI(安卓应用二进制接口) 的 BusyBox:
+Mira currently ships BusyBox binaries for four Android ABIs:
 
-| ABI | 资产路径 | 大小 |
+| ABI | Asset path | Size |
 | --- | --- | --- |
 | arm64-v8a | `android/app/src/main/assets/toolbox/busybox/arm64-v8a/busybox` | 1342824 bytes |
 | armeabi-v7a | `android/app/src/main/assets/toolbox/busybox/armeabi-v7a/busybox` | 1001940 bytes |
 | x86 | `android/app/src/main/assets/toolbox/busybox/x86/busybox` | 1525984 bytes |
 | x86_64 | `android/app/src/main/assets/toolbox/busybox/x86_64/busybox` | 1523248 bytes |
 
-运行时按 `Build.SUPPORTED_ABIS` 的系统优先级选择第一个可用资产。
+At runtime, the app picks the first available asset according to `Build.SUPPORTED_ABIS`.
 
-## 机器可读清单
+## Machine-readable manifest
 
-总清单位于:
+The top-level manifest lives at:
 
 ```text
 android/app/src/main/assets/toolbox/manifest.json
 ```
 
-每个 ABI 目录下还保留对应 `SOURCE.txt`, 记录版本, 来源, 构建脚本和 SHA256(安全哈希摘要)。
+Each ABI directory also keeps a `SOURCE.txt` file with the version, source, build script, and SHA256.
 
-## 构建来源
+## Build source
 
-BusyBox 来源版本:
+BusyBox currently comes from:
 
 ```text
 LAMDA v9.25 release busybox assets
 ```
 
-来源:
+Source:
 
 ```text
 https://github.com/firerpa/lamda/releases/tag/v9.25
 ```
 
-重新下载并校验全部 ABI 资产:
+To re-download and verify all ABI assets:
 
 ```bash
 tools/toolbox/download-lamda-busybox.sh
 ```
 
-下载脚本会同时获取对应 `.sha256sum` 文件并校验后写入 APK 资产目录, `SOURCE.txt` 和 `manifest.json`。
+The download script also fetches the matching `.sha256sum` files, validates them, and writes the APK asset directory, `SOURCE.txt`, and `manifest.json`.
 
-仓库仍保留 `tools/toolbox/build-busybox-android.sh` 作为自构建实验脚本, 但当前 APK 默认打包的是 LAMDA release(发布版本) 二进制。切换原因是自构建版本的 `wget` 在 Android 设备上可能触发 Segmentation fault(段错误), LAMDA 版本覆盖的 applet(子命令) 更完整。
+The repository still keeps `tools/toolbox/build-busybox-android.sh` as a self-build experiment script, but the APK currently ships the LAMDA release binaries by default. The switch happened because the self-built `wget` could trigger a segmentation fault on Android devices, while the LAMDA build exposes a more complete applet set.
 
-## 会话释放流程
+## Session release flow
 
 ```text
 Open Terminal
   -> MiraRelayClient
   -> MiraToolbox.prepare(sessionId)
-  -> 按设备 ABI 选择 BusyBox 资产
+  -> Select BusyBox asset by device ABI
   -> /data/user/0/com.vwww.mira/cache/mira-sessions/<sessionId>/bin/busybox
-  -> 执行 busybox --list 获取真实支持的 applet(子命令)
-  -> 为全部真实支持的 applet 创建 symlink(符号链接)
-  -> 复制 manifest.json 到 session 根目录
-  -> MiraPtyFactory 把 session bin 放到 PATH 前面
-  -> 创建 PTY(伪终端)
-  -> session.close 后删除 mira-sessions/<sessionId>
+  -> Run busybox --list to get the real supported applets
+  -> Create symlinks for all actually supported applets
+  -> Copy manifest.json to the session root
+  -> MiraPtyFactory prepends the session bin directory to PATH
+  -> Create PTY
+  -> Remove mira-sessions/<sessionId> after session.close
 ```
 
-## 运行时环境变量
+## Runtime environment variables
 
-远程 PTY 会新增:
+Remote PTY sessions add:
 
 ```text
 MIRA_TOOLBOX_BIN=/data/user/0/com.vwww.mira/cache/mira-sessions/<sessionId>/bin
@@ -83,7 +87,7 @@ MIRA_PATH_PREFIX=$MIRA_TOOLBOX_BIN
 PATH=$MIRA_TOOLBOX_BIN:$PREFIX/bin:/system/bin:/system/xbin
 ```
 
-## 验收命令
+## Validation commands
 
 ```sh
 echo "$MIRA_BUSYBOX_ABI"
@@ -94,15 +98,15 @@ command -v ls
 ls /proc/self | head -3
 ```
 
-预期 `busybox` 和 `ls` 都来自 `cache/mira-sessions/<sessionId>/bin`。
+`busybox` and `ls` are expected to resolve from `cache/mira-sessions/<sessionId>/bin`.
 
-Mira 不再使用手写 applet 白名单。BusyBox 二进制支持什么命令, 当前 session 就释放什么命令入口。若二进制不支持某个系统命令, Mira 不会创建对应入口, 因此不会遮蔽 Android 系统自带命令。
+Mira no longer uses a handwritten applet allowlist. Whatever commands the BusyBox binary actually supports are what the current session exposes. If the binary does not support a system command, Mira does not create that entry point and therefore does not shadow the Android system command.
 
-## 当前边界
+## Current boundaries
 
-1. 只在远程 Relay(中继) session 中释放工具箱, Local Terminal(本地终端) 暂不接入。
-2. 会话目录是临时工具副本, 会话关闭后删除。
-3. APK 内的 BusyBox 资产不会删除, 这是直接打包方案的基础。
-4. BusyBox 使用 GPL-2.0 许可证, 分发时需要保留来源和许可证说明。
-5. LAMDA v9.25 的 BusyBox 资产不包含 `wget` applet, 当前不会创建 `wget` 命令入口。
-6. 当前工具箱不实现 apt, 包索引或动态工具包下发。
+1. The toolbox is released only inside remote Relay sessions. Local Terminal is not yet wired in.
+2. The session directory is a temporary tool copy and is removed when the session closes.
+3. The BusyBox assets inside the APK are not deleted. They are the basis of the direct-packaging path.
+4. BusyBox uses GPL-2.0, so source and license notices must stay with redistribution.
+5. The LAMDA v9.25 BusyBox assets do not include the `wget` applet, so Mira does not create a `wget` command entry today.
+6. The current toolbox does not implement `apt`, package indexes, or dynamic tool delivery.

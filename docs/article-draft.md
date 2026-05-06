@@ -1,122 +1,100 @@
-# 开源 | Mira: 让 AI 直接操作 Android/iOS 运行时
+<p align="right">
+  English | <a href="./article-draft.zh-CN.md">简体中文</a>
+</p>
+
+# Article Draft | Mira: Let AI Operate Android and iOS Runtimes Directly
 
 ---
 
-## 背景
+## Background
 
-**这是一个防护端工具**.
+**This is a defensive research tool.**
 
-移动安全里的风险环境识别一直有几个老问题: 工具要么闭源, 要么零散分布, 一旦公开就容易被针对性对抗. 同时, 不同风险环境往往都有各自的隐藏方式, 每发一个新版, 分析流程都可能要重来一遍.
+Runtime risk-environment detection in mobile security has several recurring problems. Tools are often closed-source or scattered. Once a path is published, it can be targeted quickly. Different hostile environments also hide themselves in different ways, so every new version can force analysts to redo the workflow from scratch.
 
-更麻烦的是, AI 虽然很适合参与分析, 但它通常看不到设备运行时的真实状态, 只能依赖人工粘贴日志、补充截图、转述现象. 一旦信息经过人工中转, 上下文就会丢失, 分析效率和准确性都会明显下降.
+AI is useful for analysis, but in most setups it cannot see the real runtime state of the device. It depends on copied logs, screenshots, and human retelling. Once information passes through manual forwarding, context is lost and both efficiency and accuracy drop.
 
-Mira 想解决的不是单纯的信息展示问题, 而是让 AI 真正进入设备运行时, 观察环境甚至执行逻辑、验证猜想, 再给出分析结论.
+Mira is not just trying to improve information display. It is trying to let AI actually enter the device runtime, observe the environment, execute logic, validate hypotheses, and then produce analysis conclusions.
 
-一句话概括, **Mira 是一个把 AI 接入 Android/iOS 运行时的动态分析工作台**.
+In one sentence, **Mira is a dynamic analysis workbench that connects AI to Android and iOS runtimes.**
 
 ---
 
-## 核心能力
+## Core capabilities
 
-### Android/iOS 双端工作台
+### Unified Android and iOS workbench
 
-Mira 在 Android 和 iOS 两侧都提供统一的运行时操作入口, 内置 busybox 命令集与 Frida Gadget, 提供交互式终端能力. 在 Android 侧, 可以直接操作进程视角的 procfs. 在 iOS 侧, 则通过 syscall 翻译方式模拟出近似的命令行体验.
+Mira provides a unified runtime operation entry on both Android and iOS. It ships a BusyBox command set and Frida Gadget, and exposes an interactive terminal. On Android, it can directly inspect procfs from the process perspective. On iOS, it simulates a close command-line experience through syscall translation.
 
 | Android | iOS |
 | --- | --- |
 | ![](./android-remote-frida.png) | ![](./ios-remote-frida.png) |
 
-### 内置 mira-mcp
+### Built-in mira-mcp
 
-Mira 通过 MCP(Model Context Protocol, 模型上下文协议) 将设备侧能力结构化暴露给 AI. 这意味着 Claude 等模型不再只是读取你转发的日志, 而是可以直接发起命令、**执行任意进程内逻辑**、分析环境特征.
+Mira exposes device-side capabilities to AI through MCP. That means models such as Claude are no longer limited to reading forwarded logs. They can issue commands, execute in-process logic, and analyze runtime traits directly.
 
 ![](./mira-mcp-claude.png)
 
-### 可复用经验沉淀
+### Reusable knowledge accumulation
 
-每分析一个环境或框架, 沉淀三类资产: 文章(分析过程与关键坑点)、Case(证据链与后续验证方向)、Skill(可被 AI 调用的检查流程). 如果你关注 AI 如何提升移动安全效率, 欢迎 star / watch.
+Each environment or framework analysis can produce three kinds of assets: articles, cases, and skills. If you care about how AI can improve mobile security efficiency, starring or watching the project helps you follow that accumulation.
 
 ---
 
-## 场景演示
+## Demo scenarios
 
-### 场景一: 利用 Unix Shell 快速分析隐藏痕迹
+### Scenario 1: Use the Unix shell to quickly surface hidden traces
 
-该部分展现 AI 利用 Mira Unix shell 的方便之处.
+A frequently overlooked side channel comes from differences in `stat` results. For the same unreadable path, `No such file or directory` means the path does not exist at all, while `Permission denied` means the path exists but is inaccessible to the current process.
 
-一个很容易被忽略的侧信道来自 `stat` 命令的返回差异. 对同样不可直接读取的路径来说, `No such file or directory` 表示路径根本不存在, 而 `Permission denied` 则说明路径存在, 只是当前进程没有权限访问.
+That means even a third-party app permission set can still infer the existence of sensitive directories by probing many candidate paths and comparing return states.
 
-这意味着, 即使只有第三方 App 权限, 仍然可以通过批量探测路径返回状态, 推断某些关键目录是否真实存在.
-
-下图展示了 AI 直接通过 Mira 的 Unix Shell 能力完成探测, 并识别出 Android 设备上狐狸面具的安装痕迹:
+The image below shows AI using the Mira Unix shell to do that probing and surface Magisk installation traces on Android:
 
 ![](./stat-magisk.gif)
 
-同样的方法也适用于 iOS 场景. 在 iOS 上, Mira 会在 `/mira/` 下提供一套类 Android 的文件系统视图和进程视图, 便于使用熟悉的命令集去操作 iOS 路径.
-
-笔者在 iPhone X 环境安装了 Cydia, 因为没研究过 Cydia 实现, 不知道可能的痕迹, 但这个 AI 清楚, 于是命令 AI 自己来狠狠的探索一下! 结果什么依赖目录、包管理痕迹或历史文件全都给捅出来了, 甚至其他相关的框架痕迹都一股脑弄出来了.
+The same idea also works on iOS. Mira exposes Android-like file and process views under `/mira/` on iOS so familiar command-line workflows can still be used there.
 
 ![](./cydia-ios.gif)
 
-这个场景的价值在于, **很多原本需要人工经验驱动的路径探测动作, 都可以由 AI 低成本重复执行, 而且天然适合批量化和自动化**.
+The value of this scenario is that many steps that used to require manual experience can now be repeated by AI at low cost and scaled naturally.
 
-> 注: Mira 已内置 busybox 的所有命令, 后续还会继续适配和增加, 另外针对 `stat` 等调用的对抗, 后续也会使用内联 svc 和动态下发 so 等方案实现无法被针对性的 hook.
+### Scenario 2: Dynamically identify LSPosed injection traits
 
----
+This scenario answers a common question: when you suspect LSPosed or a similar framework has injected into the target process, how do you validate runtime traits quickly instead of stopping at static guesses.
 
-### 场景二: 动态识别 LSP 注入特征
-
-这个场景解决的问题是: **当你怀疑目标进程被 LSPosed 或类似框架注入时, 如何快速验证运行时特征, 而不是停留在源码猜测阶段**.
-
-Mira 内置 Frida Gadget 与适配好的 frida-cli, 因此 **AI 可通过 mira-mcp 直接执行任意 Java 层和 Native 层的动态逻辑**. 例如在分析 LSPosed 时, 一个自然的问题就是: 它通过自定义 ClassLoader 加载类后, 运行时会不会留下稳定特征.
-
-如果沿着传统路径做验证, 往往意味着你要手写脚本、反复试错、补日志、再解释给 AI. 但在 Mira 里, AI 可以直接围绕 `ClassLoader`、类枚举、调用栈和内存对象做动态探测, 很快筛出异常加载链路.
-
-下图展示了 AI 基于运行时枚举结果, 识别出 3 种异常 `ClassLoader` 注入特征:
+Mira ships Frida Gadget and an adapted frida-cli, so AI can use mira-mcp to run Java-side and native-side dynamic logic directly. That makes it easy to probe `ClassLoader`, enumerate classes, inspect stacks, and identify unusual loading chains.
 
 ![](./Area.gif)
 
-这个场景的价值在于, **很多原本验证路径很长的问题, 现在都可以先让 AI 提出猜想, 再立即在设备运行时中验证**. 对移动安全分析来说, 这种从怀疑到验证的闭环速度非常关键.
+The value here is that many long validation paths can now become a fast loop of hypothesis and runtime verification.
 
-未来 Mira 还会补充更通用的内存提取能力. 到那时, 不仅能识别 `InMemoryDexClassLoader`, 还可以进一步提取内存中的 dex, 分析其实际注入逻辑.
+### Scenario 3: Remote collaborative analysis
 
----
-
-### 场景三: 远程协作分析
-
-这个场景解决的问题是: **当样本、设备或运行环境不在你手上时, 如何让其他人快速介入分析, 而不是靠截图和口头描述反复来回沟通**.
-
-Mira 基于 cpolar 提供临时公网接入能力, 后续也会补充 Cloudflare 等更适合海外环境的接入方式. 这意味着你可以把设备运行时能力临时共享出去, 让其他分析者直接接入同一个环境, 使用命令行和 Frida 进行联合分析.
+When the sample, device, or runtime environment is not physically with you, Mira can temporarily expose the authorized session through cpolar and later other tunnel providers. That lets another analyst join the same environment directly instead of relying on screenshots and verbal relays.
 
 ![](./public-deploy.png)
 
-这个场景的核心价值不只是远程访问, 而是把原本高度依赖本地环境和个人经验的分析工作, 变成一个可协作、可复现、可共享的过程.
+The core value is not only remote access. It is turning analysis from a highly local, experience-heavy activity into a shareable and reproducible workflow.
 
 ---
 
-## 部署
+## Deployment
 
-目前有两种主要接入方式:
+There are currently two main access modes:
 
-- **本地模式**: 通过 adb 直连, 适合日常分析与本地调试
-- **Relay 公网模式**: 通过脚本将会话扩展到公网, 适合云手机场景或远程协作分析
-
----
-
-## 边界说明
-
-Mira 面向授权研究与自有 App 分析场景. 工具本身只观察和交互 Mira 宿主 App 自身沙盒中的运行时能力, 不控制其他 App, 不提供 root 或 jailbreak 绕过能力, 也不面向生产 SDK 或静默后台控制场景.
+- **Local mode**: direct local workflows for daily analysis and debugging
+- **Public Relay mode**: extend the session to the public internet for cloud devices or remote collaboration
 
 ---
 
-## 结尾
+## Boundaries
 
-如果你正在做 Android 或 iOS 风险环境分析, 希望让 AI 真正参与动态验证过程, 或者手里有值得沉淀的新样本、新对抗场景, 欢迎一起补充 Mira 的经验库.
+Mira is for authorized research and analysis of your own app environment. It observes and interacts only with capabilities inside the Mira host app sandbox. It does not control unrelated apps, does not provide root or jailbreak bypass, and is not intended as a production SDK or a silent background control channel.
 
-你可以通过以下方式参与:
+---
 
-- 提 issue, 补充不同设备上发现的问题, 或新的风险环境识别思路
-- 提交 case, 丰富证据链和验证样本
-- 提交 skill, 把高价值分析流程沉淀成可复用能力
+## Closing
 
-开源地址: [GitHub - MIRA](https://github.com/vwww-droid/Mira)
+If you work on Android or iOS risk-environment analysis, want AI to participate in dynamic verification, or have new samples and evasion cases worth turning into reusable knowledge, contributions are welcome.

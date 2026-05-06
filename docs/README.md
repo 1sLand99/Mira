@@ -1,28 +1,36 @@
+<p align="right">
+  English | <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
 # Docs
 
-`docs/` 只保留当前有效文档的入口, 研究记录和阶段性材料分别放到 `notes/` 与 `archive/`.
+`docs/` keeps the entry points for current documentation only. Research notes and phase materials live under `notes/` and `archive/`.
 
 ## Start Here
 
-1. `GETTING-STARTED.md`: 安装, 构建, 连接, MCP 和 CLI 使用入口.
+1. `GETTING-STARTED.md`: setup, build, connect, MCP, and CLI entry guide.
 
 ## Current
 
-1. `REMOTE-RELAY.md`: Relay 和远程按需终端说明.
-2. `MCP.md`: MCP server 说明, 以及 Claude Desktop / Codex 的实际接入配置.
-3. `IOS-APP.md`: iOS App 架构和运行说明.
-4. `NATIVE-ARCHITECTURE.md`: Android 和 iOS 共享原生 PTY 架构.
-5. `TOOLBOX.md`: Android 内置工具箱说明.
-6. `REPO-ARCHITECTURE.md`: 仓库当前分层与目录说明.
-7. `THIRD-PARTY-NOTICES.md`: 第三方组件许可证与来源说明.
+1. `REMOTE-RELAY.md`: Relay and remote on-demand terminal guide.
+2. `MCP.md`: MCP server guide and practical Claude Desktop and Codex integration config.
+3. `IOS-APP.md`: iOS app architecture and runtime notes.
+4. `NATIVE-ARCHITECTURE.md`: shared native PTY architecture for Android and iOS.
+5. `TOOLBOX.md`: built-in Android toolbox guide.
+6. `REPO-ARCHITECTURE.md`: current repository layering and directory layout.
+7. `THIRD-PARTY-NOTICES.md`: third-party licenses and source notes.
+
+## Drafts
+
+1. `article-draft.md`: public article draft for project positioning and scenario demos.
 
 ## Notes
 
-1. `notes/ARTICLE-MIRA-RESEARCH-PROTOTYPE.md`: 项目背景文章与研究表达.
-2. `notes/TERMUX-FORK.md`: Termux fork 备用路线记录.
-3. `notes/TODO.md`: 阶段性待办与研究计划.
+1. `notes/ARTICLE-MIRA-RESEARCH-PROTOTYPE.md`: project background article and research framing.
+2. `notes/TERMUX-FORK.md`: backup route notes for the Termux fork path.
+3. `notes/TODO.md`: phase todos and research plan.
 
 ## Archive
 
-1. `archive/ANDROID-MVP.md`: Android MVP 阶段记录.
-2. `archive/IOS-ISH-POC.md`: iOS iSH POC 阶段记录.
+1. `archive/ANDROID-MVP.md`: Android MVP phase record.
+2. `archive/IOS-ISH-POC.md`: iOS iSH POC phase record.
