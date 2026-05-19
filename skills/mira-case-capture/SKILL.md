@@ -69,10 +69,11 @@ Always try to extract:
 
 Save case files under:
 
-`knowledge/cases/YYYY/YYYY-MM-DD-<object>-<signal-surface>.md`
+`knowledge/cases/en/YYYY/YYYY-MM-DD-<object>-<signal-surface>.md` and `knowledge/cases/zh/YYYY/YYYY-MM-DD-<object>-<signal-surface>.md`
 
-Use an English slug in the filename.
-Keep human-readable Chinese explanation inside the file body.
+Use the same English slug in both filenames.
+Write the English case in `en/` and the Chinese adaptation in `zh/`.
+Store language-neutral executable case artifacts under `knowledge/cases/artifacts/YYYY/`.
 
 ## Minimal Good Case
 

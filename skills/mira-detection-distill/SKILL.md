@@ -73,11 +73,11 @@ Examples:
 
 Keep outputs separate by path:
 
-1. `knowledge/cases/YYYY/...` for raw case records.
+1. `knowledge/cases/en/YYYY/...` and `knowledge/cases/zh/YYYY/...` for bilingual case records.
 2. `knowledge/topics/<topic-slug>/...` for topic assets.
 3. `knowledge/articles/en/<topic-slug>.md` for English-first drafts.
 4. `knowledge/articles/zh/<topic-slug>.md` for Chinese adaptations.
-5. reusable scripts under the closest existing tooling path, such as `tools/android/...`, and link them from cases or topics instead of duplicating them in article prose.
+5. reusable scripts under the closest existing tooling path, such as `tools/android/...`, plus case-specific executable snapshots under `knowledge/cases/artifacts/YYYY/` when needed for reproduction.
 
 When context is incomplete, do not emit a fake template.
 Instead, state what is missing and preserve the pipeline state.
@@ -86,11 +86,12 @@ Instead, state what is missing and preserve the pipeline state.
 
 When a detection finding includes a reusable shell script or command harness:
 
-1. create or update the script artifact in the appropriate tools path.
-2. capture execution semantics in the case, including how to run it inside Mira.
-3. link the script from any topic pattern that depends on it.
-4. keep articles focused on method and boundaries, not full script dumps, unless the article is explicitly script-centered.
-5. preserve known-bad invocation forms and parameter pitfalls as case evidence.
+1. create or update the maintained script artifact in the appropriate tools path.
+2. store the validated script snapshot under `knowledge/cases/artifacts/YYYY/` when the script is central to reproducing the case.
+3. capture execution semantics in both English and Chinese case records, including how to run it inside Mira.
+4. link the script from any topic pattern that depends on it.
+5. keep articles focused on method and boundaries, not full script dumps, unless the article is explicitly script-centered.
+6. preserve known-bad invocation forms and parameter pitfalls as case evidence.
 
 ## Dynamic Topic Protocol
 

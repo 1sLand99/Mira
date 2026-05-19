@@ -320,10 +320,12 @@ codex -a never exec \
 
 Mira Android terminal can be used as a generic side-channel execution surface. Magisk detection logic should stay in generated shell scripts, not in MCP tools.
 
-Reusable script and case record:
+Reusable script and case records:
 
 1. `tools/android/mira-proc-audit-sidechannel.sh`
-2. `knowledge/cases/2026/2026-05-19-android-proc-audit-magisk-sidechannel.md`
+2. `knowledge/cases/artifacts/2026/2026-05-19-android-proc-audit-magisk-sidechannel.sh`
+3. `knowledge/cases/en/2026/2026-05-19-android-proc-audit-magisk-sidechannel.md`
+4. `knowledge/cases/zh/2026/2026-05-19-android-proc-audit-magisk-sidechannel.md`
 
 Key constraints:
 

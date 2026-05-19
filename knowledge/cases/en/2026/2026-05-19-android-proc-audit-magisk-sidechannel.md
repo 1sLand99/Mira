@@ -45,7 +45,7 @@ Not confirmed. This is captured as a single case. Create `knowledge/topics/andro
 Case script artifact:
 
 ```text
-knowledge/cases/2026/2026-05-19-android-proc-audit-magisk-sidechannel.sh
+knowledge/cases/artifacts/2026/2026-05-19-android-proc-audit-magisk-sidechannel.sh
 ```
 
 Maintained reusable copy:
@@ -82,7 +82,7 @@ If the scan is unstable:
 
 ## 9. script snapshot
 
-This is the script snapshot validated for this case. The same snapshot is also stored as `2026-05-19-android-proc-audit-magisk-sidechannel.sh` beside this case record so it can be executed directly from the case directory.
+This is the script snapshot validated for this case. The same snapshot is also stored as `knowledge/cases/artifacts/2026/2026-05-19-android-proc-audit-magisk-sidechannel.sh` so it can be executed directly as a case artifact.
 
 ```sh
 # Mira Android proc audit side-channel probe.
