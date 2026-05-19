@@ -320,10 +320,10 @@ codex -a never exec \
 
 Mira 的 Android 终端可以作为通用侧信道执行环境, 但 Magisk 检测逻辑不应固化进 MCP tool(工具)本身。推荐把检测策略写成 shell 片段, 通过 `mira_run_command` 注入当前 PTY 执行。
 
-已沉淀的通用脚本和写法说明见:
+已沉淀的通用脚本和 case(案例)记录见:
 
 1. `tools/android/mira-proc-audit-sidechannel.sh`
-2. `docs/notes/MIRA-ANDROID-AUDIT-SIDECHANNEL.zh-CN.md`
+2. `knowledge/cases/2026/2026-05-19-android-proc-audit-magisk-sidechannel.md`
 
 关键约束:
 
