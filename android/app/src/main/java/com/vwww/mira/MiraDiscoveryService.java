@@ -325,7 +325,7 @@ public final class MiraDiscoveryService extends Service {
             sendDeviceCommandResult(body, "mira", false, "", "missing command");
             return;
         }
-        if (!"mira-logcat".equals(command) && !"mira-getxattr".equals(command)) {
+        if (!"mira-logcat".equals(command)) {
             sendDeviceCommandResult(
                 body,
                 command,

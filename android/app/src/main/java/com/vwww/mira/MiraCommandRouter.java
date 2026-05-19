@@ -5,8 +5,6 @@ import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.Settings;
-import android.system.ErrnoException;
-import android.system.Os;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -53,8 +51,6 @@ final class MiraCommandRouter {
                     return runDumpsys(argv);
                 case "mira-logcat":
                     return runLogcat(argv);
-                case "mira-getxattr":
-                    return runGetxattr(argv);
                 default:
                     return MiraCommandResult.error("unsupported Mira command: " + tool + "\n");
             }
@@ -238,26 +234,6 @@ final class MiraCommandRouter {
             command.add("time");
         }
         return MiraProcessRunner.run(command, LOGCAT_TIMEOUT_MS);
-    }
-
-    private static MiraCommandResult runGetxattr(List<String> argv) {
-        if (argv.size() != 2 || "help".equals(argv.get(0)) || "--help".equals(argv.get(0))) {
-            return MiraCommandResult.ok("usage: mira-getxattr PATH ATTRIBUTE\n");
-        }
-        String path = argv.get(0);
-        String attribute = argv.get(1);
-        try {
-            byte[] raw = Os.getxattr(path, attribute);
-            if (raw == null || raw.length == 0) return MiraCommandResult.ok("\n");
-            String value = new String(raw, StandardCharsets.UTF_8).replace("\u0000", "").trim();
-            return MiraCommandResult.ok(value + "\n");
-        } catch (ErrnoException failure) {
-            return new MiraCommandResult(
-                1,
-                "",
-                "mira-getxattr: " + path + " " + attribute + ": " + failure.getMessage() + "\n"
-            );
-        }
     }
 
     private static String normalizeNamespace(String namespace) {
