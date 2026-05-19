@@ -74,7 +74,77 @@ If the scan is unstable:
 3. Keep `logcat -c -b all` before every window.
 4. Do not only increase `sleep`, because the core failure mode is usually audit rate limiting.
 
-## 9. result
+## 9. script snapshot
+
+This is the script snapshot validated for this case. Keep this copy in the case so the finding remains reproducible even if the reusable tool script evolves later.
+
+```sh
+# Mira Android proc audit side-channel probe.
+#
+# Usage inside a Mira PTY:
+#   1. Paste this file content into mira_run_command.
+#   2. Or write it to the device and source it in the current shell:
+#      . /data/data/com.vwww.mira/cache/mira-proc-audit-sidechannel.sh
+#
+# Do not run this probe with "sh mira-proc-audit-sidechannel.sh".
+# The signal depends on the current Mira PTY shell process touching /proc/<pid>.
+#
+# Tunables:
+#   START=1 END=10000 CHUNK=50 STEP=50 WAIT_SEC=1 COOLDOWN_SEC=2 LOG_TAIL=1000
+#   MATCH='tcontext=u:r:magisk:s0|tcontext=u:r:su:s0|tcontext=u:r:magiskd:s0'
+#   HIT_FILE=/data/data/com.vwww.mira/cache/audit_sidechannel_hit.txt
+
+mira_proc_audit_sidechannel_probe() {
+  START=${START:-1}
+  END=${END:-10000}
+  CHUNK=${CHUNK:-50}
+  STEP=${STEP:-$CHUNK}
+  WAIT_SEC=${WAIT_SEC:-1}
+  COOLDOWN_SEC=${COOLDOWN_SEC:-2}
+  LOG_TAIL=${LOG_TAIL:-1000}
+  MATCH=${MATCH:-'tcontext=u:r:magisk:s0|tcontext=u:r:su:s0|tcontext=u:r:magiskd:s0'}
+  HIT_FILE=${HIT_FILE:-/data/data/com.vwww.mira/cache/audit_sidechannel_hit.txt}
+
+  s=$START
+  rm -f "$HIT_FILE" >/dev/null 2>&1
+
+  while [ "$s" -le "$END" ]; do
+    e=$((s + CHUNK - 1))
+    [ "$e" -gt "$END" ] && e=$END
+    echo "[probe] scan pid=$s-$e"
+
+    /system/bin/logcat -c -b all >/dev/null 2>&1
+
+    p=$s
+    while [ "$p" -le "$e" ]; do
+      [ -d "/proc/$p" ] >/dev/null 2>&1
+      p=$((p + 1))
+    done
+
+    sleep "$WAIT_SEC"
+
+    /system/bin/logcat -d -b all -t "$LOG_TAIL" 2>/dev/null \
+      | grep -E "$MATCH" \
+      | tail -30 > "$HIT_FILE"
+
+    if [ -s "$HIT_FILE" ]; then
+      echo "[probe] hit pid=$s-$e"
+      cat "$HIT_FILE"
+      return 0
+    fi
+
+    s=$((s + STEP))
+    sleep "$COOLDOWN_SEC"
+  done
+
+  echo "[probe] no hit"
+  return 1
+}
+
+mira_proc_audit_sidechannel_probe
+```
+
+## 10. result
 
 The side-channel was confirmed on the target device. A representative hit:
 
@@ -84,21 +154,21 @@ avc: denied { getattr } for comm="sh" path="/proc/1030" dev="proc" ... tcontext=
 
 Recommended parameters from this case are `CHUNK=50`, `WAIT_SEC=1-3`, `COOLDOWN_SEC=2-3`, and `LOG_TAIL=1000-2000`. If a full scan misses, reduce chunk size or use overlapping steps instead of only increasing wait time.
 
-## 10. false-positive risk
+## 11. false-positive risk
 
 1. Old logcat buffers can contain stale hits, so each decision window should clear logcat first.
 2. `tcontext=u:r:magisk:s0` is a strong signal, but the supported conclusion is exposure of a Magisk-related SELinux context, not a complete root capability assessment.
 3. Android version, ROM, SELinux policy, Magisk configuration, and logcat visibility can affect observability.
 4. A wide-window miss is not evidence that Magisk is absent. It can be caused by audit rate limiting or window noise.
 
-## 11. distilled judgment seeds
+## 12. distilled judgment seeds
 
 1. If a single audit side-channel probe hits but batch probing misses, suspect rate limiting and window noise first.
 2. For Mira PTY scripts, current-shell execution and `sh file` are not equivalent until proven otherwise.
 3. For `/proc` scans, keep the trigger window below the audit noise threshold and avoid placing the target PID too late in the window.
 4. `logcat -c` isolates current-window evidence, but it does not replace chunk control.
 
-## 12. suggested next checks
+## 13. suggested next checks
 
 1. Validate `CHUNK=50` versus `CHUNK=10` across more Android versions and ROMs.
 2. Validate overlapping windows, such as `CHUNK=50 STEP=25`, to reduce misses when the target lands late in a window.
@@ -106,6 +176,6 @@ Recommended parameters from this case are `CHUNK=50`, `WAIT_SEC=1-3`, `COOLDOWN_
 4. Compare audit visibility under enforcing and permissive modes.
 5. Decide whether enough cases exist to promote this into a topic and article draft.
 
-## 13. linked articles
+## 14. linked articles
 
 None yet. This remains a case record. A future article should derive boundaries, false-positive risks, and stable parameters from this case plus additional device samples.

@@ -46,14 +46,15 @@ Keep ephemeral noise out unless it explains a likely misread.
 When a detection case depends on a shell script, command sequence, or Mira PTY execution behavior, the case must capture the script as an executable method, not just as supporting evidence. Include:
 
 1. script artifact path when a reusable script is created.
-2. exact invocation model, such as paste into current PTY, source with `. file`, or run through `mira_run_command`.
-3. forbidden or misleading invocation forms, such as `sh file` when it changes behavior.
-4. tunable parameters and known-good defaults.
-5. environment assumptions, including current shell process, PTY state, log buffers, and available applets.
-6. observed failure modes caused by chunk size, timing, buffering, rate limits, or command noise.
-7. minimal validation command proving the script still works.
+2. script snapshot embedded in the case when the script is central to reproducing the finding.
+3. exact invocation model, such as paste into current PTY, source with `. file`, or run through `mira_run_command`.
+4. forbidden or misleading invocation forms, such as `sh file` when it changes behavior.
+5. tunable parameters and known-good defaults.
+6. environment assumptions, including current shell process, PTY state, log buffers, and available applets.
+7. observed failure modes caused by chunk size, timing, buffering, rate limits, or command noise.
+8. minimal validation command proving the script still works.
 
-Do not bury reusable script behavior only in docs. A future reader should be able to rerun or adapt the script from the case record and linked artifact.
+Do not bury reusable script behavior only in docs. A future reader should be able to rerun or adapt the script from the case record itself, while the linked artifact remains the maintained reusable copy.
 
 ## Smells And Clues
 
