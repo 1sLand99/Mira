@@ -126,7 +126,7 @@ public final class MiraToolbox implements Closeable {
             "mira-getprop",
             "mira-dumpsys",
             "mira-logcat",
-            "mira-proc-audit"
+            "mira-getxattr"
         };
         for (String command : commands) {
             File wrapper = new File(binDir, command);

@@ -183,8 +183,6 @@ export type DeviceLogcatResponse = {
   error?: string;
 };
 
-export type DeviceProcAuditResponse = DeviceLogcatResponse;
-
 export type DeviceMetrics = {
   sampledAt?: number;
   cpuPercent?: number;

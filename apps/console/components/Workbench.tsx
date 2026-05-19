@@ -5,7 +5,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { DeviceFrame } from '@/components/DeviceFrame';
 import { ConsoleEvent, TerminalStage } from '@/components/TerminalStage';
 import { deviceTitle, shortId } from '@/lib/format';
-import { fetchDeviceLogcat, fetchDeviceProcAudit, fetchServerLogs } from '@/lib/relay';
+import { fetchDeviceLogcat, fetchServerLogs } from '@/lib/relay';
 import type { MiraDevice } from '@/lib/types';
 
 export function Workbench({
@@ -142,41 +142,6 @@ export function Workbench({
     [logcatBuffer, logcatCount, logcatLevel, logcatTag, selectedDevice],
   );
 
-  const runProcAuditScan = useCallback(
-    async () => {
-      if (devicePlatform(selectedDevice) !== 'android') {
-        setLogcatError('当前只支持 Android 设备的 proc audit scan.');
-        setLogcatText('');
-        return;
-      }
-      setLogcatLoading(true);
-      setLogcatError('');
-      try {
-        const response = await fetchDeviceProcAudit({
-          installId: selectedDevice.installId,
-          maxPid: 10000,
-          count: logcatCount,
-          chunkSize: 500,
-          timeoutMs: 70000,
-        });
-        const stderr = response.stderr ? `\n\n[stderr]\n${response.stderr.trim()}` : '';
-        const output = `${response.stdout || ''}${stderr}`.trim();
-        setLogcatText(output || '(mira-proc-audit returned no output)');
-        setLogcatAt(new Date().toLocaleTimeString());
-        if (!response.ok) {
-          setLogcatError(response.error || response.stderr || `mira-proc-audit exited with ${response.exitCode}`);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setLogcatError(message);
-        setLogcatText(message || 'mira-proc-audit request failed');
-      } finally {
-        setLogcatLoading(false);
-      }
-    },
-    [logcatCount, selectedDevice],
-  );
-
   useEffect(() => {
     if (activePanel !== 'android-logcat') return;
     if (logcatText || logcatLoading) return;
@@ -290,7 +255,6 @@ export function Workbench({
         onLevelChange={setLogcatLevel}
         onSearchChange={setLogcatSearch}
         onRefresh={() => loadLogcat()}
-        onProcAudit={() => runProcAuditScan()}
       />
     </section>
   );
@@ -675,7 +639,6 @@ function AndroidLogcatPanel({
   onLevelChange,
   onSearchChange,
   onRefresh,
-  onProcAudit,
   onClose,
 }: {
   open: boolean;
@@ -697,7 +660,6 @@ function AndroidLogcatPanel({
   onLevelChange: (value: string) => void;
   onSearchChange: (value: string) => void;
   onRefresh: () => void;
-  onProcAudit: () => void;
   onClose: () => void;
 }) {
   if (!open) return null;
@@ -719,15 +681,6 @@ function AndroidLogcatPanel({
               disabled={disabled}
             >
               {loading ? 'Loading...' : 'Refresh'}
-            </button>
-            <button
-              type="button"
-              onClick={onProcAudit}
-              className="rounded border border-[#8f8f8f] bg-white px-2 py-0.5 text-[12px] font-semibold text-[#333] transition hover:bg-[#f0f7ff] disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={disabled}
-              title="在 App 内扫描 /proc 并读取 App 可见 proc audit 日志"
-            >
-              Proc audit
             </button>
             <button
               type="button"

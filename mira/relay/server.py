@@ -695,71 +695,6 @@ async def api_device_logcat(state: RelayState, body: dict[str, Any]) -> bytes:
     )
 
 
-async def api_device_proc_audit(state: RelayState, body: dict[str, Any]) -> bytes:
-    install_id = str(body.get("installId") or "").strip()
-    if not install_id:
-        return json_response("400 Bad Request", {"error": "missing installId"})
-    max_pid = int_field(body, "maxPid", 1, 100000)
-    if max_pid is None:
-        max_pid = 10000
-    start_pid = int_field(body, "startPid", 1, 100000)
-    if start_pid is None:
-        start_pid = 1
-    if start_pid > max_pid:
-        start_pid = max_pid
-    count = int_field(body, "count", 1, 5000)
-    if count is None:
-        count = 5000
-    chunk_size = int_field(body, "chunkSize", 1, 5000)
-    if chunk_size is None:
-        chunk_size = 500
-    request_timeout = int_field(body, "timeoutMs", 1000, 90000)
-    if request_timeout is None:
-        request_timeout = 70000
-    request_id = uuid.uuid4().hex
-    payload = {
-        "type": "device.command",
-        "protocol": PROTOCOL_VERSION,
-        "installId": install_id,
-        "requestId": request_id,
-        "command": "mira-proc-audit",
-        "arguments": [
-            "--start-pid",
-            str(start_pid),
-            "--max-pid",
-            str(max_pid),
-            "--count",
-            str(count),
-            "--chunk-size",
-            str(chunk_size),
-        ],
-        "timeoutMs": request_timeout,
-    }
-    request_timeout_seconds = request_timeout / 1000 + 5.0
-    ok, send_error, response = await send_control_request(state, install_id, payload, request_timeout_seconds)
-    if not ok:
-        if send_error == "device not found":
-            return json_response("404 Not Found", {"error": send_error})
-        if "not connected" in send_error:
-            return json_response("409 Conflict", {"error": send_error})
-        if send_error.startswith("device control request timeout"):
-            return json_response("504 Gateway Timeout", {"error": send_error})
-        return json_response("502 Bad Gateway", {"error": send_error})
-    return json_response(
-        "200 OK",
-        {
-            "ok": bool(response.get("ok")),
-            "installId": response.get("installId", install_id),
-            "requestId": response.get("requestId", request_id),
-            "command": response.get("command", "mira-proc-audit"),
-            "exitCode": response.get("exitCode", 1),
-            "stdout": response.get("stdout", ""),
-            "stderr": response.get("stderr", ""),
-            "error": response.get("error", ""),
-        },
-    )
-
-
 async def api_screen_frame(state: RelayState, body: dict[str, Any]) -> bytes:
     install_id = str(body.get("installId") or "").strip()
     if not install_id:
@@ -1553,8 +1488,6 @@ async def handle_client(state: RelayState, reader: asyncio.StreamReader, writer:
             writer.write(await api_browser_log(parse_json_body(body)))
         elif path == "/api/device/logcat" and method.upper() == "POST":
             writer.write(await api_device_logcat(state, parse_json_body(body)))
-        elif path == "/api/device/proc-audit" and method.upper() == "POST":
-            writer.write(await api_device_proc_audit(state, parse_json_body(body)))
         elif path == "/api/open" and method.upper() == "POST":
             writer.write(await api_open(state, parse_json_body(body)))
         elif path == "/api/close" and method.upper() == "POST":

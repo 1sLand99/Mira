@@ -300,7 +300,7 @@ public final class MiraBootstrap {
             "mira-getprop",
             "mira-dumpsys",
             "mira-logcat",
-            "mira-proc-audit"
+            "mira-getxattr"
         };
         File binDir = new File(prefixDir, "bin");
         deleteLegacyFridaWrappers(binDir);

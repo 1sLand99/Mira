@@ -6,7 +6,6 @@ import type {
   ScreenInputRequest,
   ScreenInputResponse,
   DeviceLogcatResponse,
-  DeviceProcAuditResponse,
   ServerLogsResponse,
 } from './types';
 
@@ -117,16 +116,6 @@ export function fetchDeviceLogcat(input: {
   return request<DeviceLogcatResponse>('/api/device/logcat', input);
 }
 
-export function fetchDeviceProcAudit(input: {
-  installId: string;
-  startPid?: number;
-  maxPid?: number;
-  count?: number;
-  chunkSize?: number;
-  timeoutMs?: number;
-}): Promise<DeviceProcAuditResponse> {
-  return request<DeviceProcAuditResponse>('/api/device/proc-audit', input);
-}
 
 export function postBrowserLog(scope: string, message: string, installId: string, details?: unknown): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>('/api/browser/log', {
