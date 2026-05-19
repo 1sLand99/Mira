@@ -58,3 +58,13 @@ idb launch --udid <device-udid> com.vwww.mira.ios
 MIRA_ANDROID_RELAY_URL="http://<host-ip>:8765" \
 <path-to-mira-repo>/mira-android
 ```
+
+## Android MCP detection baseline
+
+1. Mira 基座只集成通用能力, 不把具体检测逻辑写死进 App 代码.
+2. Magisk 等环境检测默认走 `MCP -> shell script -> logcat/result` 链路, 由 AI 编写或选择脚本, 通过 Mira MCP 执行并分析结果.
+3. `getattr`、`getxattr`、`/proc/<pid>` 扫描、`logcat grep audit/avc` 这类动作属于检测脚本策略, 不应沉进 Mira App 的固定组件逻辑.
+4. Mira Android 侧应优先提供通用 primitive, 包括 shell 执行、PTY 会话、logcat 查看、文件投递和结果回收.
+5. 具体侧信道检测应沉淀为 `tools/android/*.sh` 和 `knowledge/cases/*` 中的可复现实验, 而不是新增 hardcoded detector.
+6. 对 Magisk audit side-channel 这类场景, 推荐脚本内部完成循环扫描、节流等待、logcat grep、命中后退出和结构化输出.
+7. 判断结论由 MCP 执行结果和 AI 分析给出, Mira UI 只负责展示通用日志和命令输出.
