@@ -32,7 +32,9 @@ Mobile runtime detection workbench for iOS and Android.
 
 ## Research Updates
 
+- [260520] [Android high-PID shell proc audit side-channel hints at scrcpy projection](./knowledge/cases/en/2026/2026-05-20-android-high-pid-shell-audit-sidechannel-scrcpy.md)
 - [260520] [Android emulator proc audit side-channel exposes qemu SELinux context](./knowledge/cases/en/2026/2026-05-20-android-emulator-proc-audit-sidechannel.md)
+- [260519] [Android proc audit side-channel detects Magisk SELinux context](./knowledge/cases/en/2026/2026-05-19-android-proc-audit-magisk-sidechannel.md)
 
 ## Features
 

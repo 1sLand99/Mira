@@ -32,7 +32,9 @@
 
 ## Research Updates
 
+- [260520] [Android 高 PID shell proc audit 侧信道提示 scrcpy 投屏](./knowledge/cases/zh/2026/2026-05-20-android-high-pid-shell-audit-sidechannel-scrcpy.md)
 - [260520] [Android 模拟器 proc audit 侧信道暴露 qemu SELinux 上下文](./knowledge/cases/zh/2026/2026-05-20-android-emulator-proc-audit-sidechannel.md)
+- [260519] [Android proc audit 侧信道检测 Magisk SELinux 上下文](./knowledge/cases/zh/2026/2026-05-19-android-proc-audit-magisk-sidechannel.md)
 
 ## Features
 
