@@ -39,6 +39,7 @@ public final class MiraSelfScreenStreamer implements Closeable {
     private static final int BITRATE = 220_000;
     private static final int I_FRAME_INTERVAL_SECONDS = 1;
     private static final long ENCODER_CREATE_TIMEOUT_MS = 3000;
+    private static final long ENCODER_COLD_CREATE_TIMEOUT_MS = 15000;
     private static final long ENCODER_CONFIGURE_TIMEOUT_MS = 3000;
     private static final long FIRST_FRAME_TIMEOUT_MS = 3000;
     private static final String PREFS_NAME = "mira-screen-encoder";
@@ -125,12 +126,14 @@ public final class MiraSelfScreenStreamer implements Closeable {
         List<VideoProfile> profiles = buildVideoProfiles(rootSize.width, rootSize.height);
         Throwable lastFailure = null;
         Set<String> skippedEncoders = new HashSet<>();
+        boolean coldCreate = true;
         for (VideoProfile profile : profiles) {
             String encoderKey = profile.encoderName == null ? "" : profile.encoderName;
             if (skippedEncoders.contains(encoderKey)) {
                 Log.i(TAG, "skipping AVC encoder candidate after create timeout " + profile.describe());
                 continue;
             }
+            profile.coldCreate = coldCreate;
             closeEncoderOnly();
             codecConfig = null;
             try {
@@ -146,10 +149,12 @@ public final class MiraSelfScreenStreamer implements Closeable {
                 Log.i(TAG, "AVC encoder started " + profile.describe());
                 return profile;
             } catch (Throwable throwable) {
+                coldCreate = false;
                 lastFailure = throwable;
                 Log.w(TAG, "AVC encoder candidate failed " + profile.describe(), throwable);
                 if (throwable instanceof CodecCreateTimeoutException) {
                     skippedEncoders.add(encoderKey);
+                    break;
                 }
                 sleepQuietly(150);
             }
@@ -228,14 +233,14 @@ public final class MiraSelfScreenStreamer implements Closeable {
 
         boolean completed;
         try {
-            completed = latch.await(ENCODER_CREATE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            completed = latch.await(profile.createTimeoutMs(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw interrupted;
         }
         if (!completed) {
             abandoned.set(true);
-            Log.w(TAG, "AVC codec create timeout " + profile.describe() + " timeoutMs=" + ENCODER_CREATE_TIMEOUT_MS);
+            Log.w(TAG, "AVC codec create timeout " + profile.describe() + " timeoutMs=" + profile.createTimeoutMs());
             throw new CodecCreateTimeoutException(profile.encoderName);
         }
         Throwable throwable = error.get();
@@ -733,6 +738,7 @@ public final class MiraSelfScreenStreamer implements Closeable {
         final int bitrate;
         final boolean forceBaseline;
         final String source;
+        boolean coldCreate;
 
         VideoProfile(String encoderName, int width, int height, int fps, int bitrate, boolean forceBaseline, String source) {
             this.encoderName = encoderName == null ? "" : encoderName;
@@ -746,6 +752,10 @@ public final class MiraSelfScreenStreamer implements Closeable {
 
         long framePeriodMs() {
             return 1000L / Math.max(1, fps);
+        }
+
+        long createTimeoutMs() {
+            return coldCreate ? ENCODER_COLD_CREATE_TIMEOUT_MS : ENCODER_CREATE_TIMEOUT_MS;
         }
 
         String key() {
