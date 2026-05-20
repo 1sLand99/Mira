@@ -144,7 +144,7 @@ MATCH='tcontext=u:r:qemu_props:s0|tcontext=u:r:[^ ]*(goldfish|ranchu|qemu)[^ ]*:
 
 If `CHUNK=50` misses, lower it to `CHUNK=10`, or use an overlapping strategy such as `CHUNK=50 STEP=25`. Do not only increase `sleep`, because the failure is usually not log latency, but audit rate limiting and window noise.
 
-## Execution syntax details
+### Execution syntax details
 
 Touching `/proc/<pid>` from the current shell is not necessarily equivalent to touching it from a new `sh script.sh` child shell.
 

@@ -144,7 +144,7 @@ MATCH='tcontext=u:r:qemu_props:s0|tcontext=u:r:[^ ]*(goldfish|ranchu|qemu)[^ ]*:
 
 如果 `CHUNK=50` 漏检, 优先降低到 `CHUNK=10`, 或使用 `CHUNK=50 STEP=25`。不要只增加 `sleep`, 因为失败原因通常不是日志延迟, 而是 audit 限流和窗口噪声。
 
-## 执行语法细节
+### 执行语法细节
 
 当前 shell 触碰 `/proc/<pid>` 和 `sh script.sh` 新开子 shell 触碰, 不等价.
 
