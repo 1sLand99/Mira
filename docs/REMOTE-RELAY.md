@@ -108,14 +108,16 @@ If you only test within the local network, prefer:
 ./mira-local-web
 ```
 
-The script prints two addresses:
+The script prints LAN-aware addresses:
 
 ```text
-Browser URL: http://localhost:8765
+Local Browser URL: http://localhost:8765
+LAN Browser URL: http://<your-lan-ip>:8765
 Android Relay URL: http://<your-lan-ip>:8765
+Screen info API: http://<your-lan-ip>:8765/api/screen/info
 ```
 
-Open the `Browser URL` on the desktop, which should be the `localhost` address. This keeps WebCodecs available inside a localhost secure context so H.264 decoding for the remote view can work.
+Open the `Local Browser URL` on the desktop for localhost secure-context WebCodecs playback. Other computers on the same Wi-Fi can open the `LAN Browser URL` to access the console and screen metadata. The Android app uploads H.264 screen data to Relay, Relay forwards the stream and caches metadata, and the LAN browser decodes H.264 with the bundled WebAssembly decoder when WebCodecs is unavailable. Scripts can read `/api/screen/info`, or `/api/screen/info?installId=<install-id>` for one device.
 
 On the Android app home screen, enter the `Android Relay URL`, which uses the desktop LAN IP. Do not enter `localhost` on the phone, because phone localhost points to the phone itself.
 

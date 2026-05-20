@@ -106,6 +106,7 @@ class DeviceRecord:
     metrics: dict[str, Any] | None = None
     metrics_last_seen: float | None = None
     screen_frame: dict[str, Any] | None = None
+    screen_frame_seen: float | None = None
     screen_last_seen: float | None = None
     screen_info: dict[str, Any] | None = None
     screen_device_writer: asyncio.StreamWriter | None = None
@@ -470,8 +471,39 @@ async def send_control_request(
     return True, "", message
 
 
+def screen_info_payload(record: DeviceRecord, now: float | None = None) -> dict[str, Any]:
+    if now is None:
+        now = time.time()
+    screen_info = dict(record.screen_info) if record.screen_info is not None else None
+    latest_frame = dict(record.screen_frame) if record.screen_frame is not None else None
+    if latest_frame is not None:
+        latest_frame.pop("dataBase64", None)
+        if record.screen_frame_seen is not None:
+            latest_frame["receivedAt"] = record.screen_frame_seen
+            latest_frame["ageMs"] = max(0, int((now - record.screen_frame_seen) * 1000))
+    screen_age_ms = None
+    if record.screen_last_seen is not None:
+        screen_age_ms = max(0, int((now - record.screen_last_seen) * 1000))
+    return {
+        "installId": record.install_id,
+        "deviceName": str(record.data.get("deviceName") or record.install_id),
+        "address": record.address or str(record.data.get("address") or ""),
+        "available": screen_info is not None or latest_frame is not None,
+        "live": record.screen_device_writer is not None and not record.screen_device_writer.is_closing(),
+        "inputAvailable": record.control_writer is not None and not record.control_writer.is_closing(),
+        "decodePath": "browser-wasm",
+        "screenInfo": screen_info,
+        "screenLastSeen": record.screen_last_seen,
+        "screenAgeMs": screen_age_ms,
+        "latestFrame": latest_frame,
+        "viewerCount": len(record.screen_clients),
+    }
+
+
 def device_payload(record: DeviceRecord) -> dict[str, Any]:
     data = dict(record.data)
+    if record.screen_info is not None or record.screen_frame is not None or record.screen_last_seen is not None:
+        data["screen"] = screen_info_payload(record)
     if record.outline is not None:
         data["outline"] = record.outline
     if record.outline_last_seen is not None:
@@ -760,10 +792,23 @@ async def api_screen_frame(state: RelayState, body: dict[str, Any]) -> bytes:
             if body.get("deviceName"):
                 record.data["deviceName"] = str(body.get("deviceName"))
         record.screen_frame = frame
+        record.screen_frame_seen = now
         record.screen_last_seen = now
         record.last_seen = now
     relay_log(f"Received screen frame installId={install_id} seq={seq} size={width}x{height}")
     return json_response("200 OK", {"ok": True, "screenLastSeen": now, "seq": seq})
+
+
+async def api_screen_info(state: RelayState, query: dict[str, list[str]]) -> bytes:
+    install_id = str((query.get("installId") or [""])[0] or "").strip()
+    now = time.time()
+    async with state.lock:
+        if install_id:
+            record = state.devices.get(install_id)
+            if record is None:
+                return json_response("404 Not Found", {"error": "device not found"})
+            return json_response("200 OK", screen_info_payload(record, now))
+        return json_response("200 OK", {"screens": [screen_info_payload(record, now) for record in state.devices.values()]})
 
 
 async def api_screen_latest(state: RelayState, query: dict[str, list[str]]) -> bytes:
@@ -775,7 +820,7 @@ async def api_screen_latest(state: RelayState, query: dict[str, list[str]]) -> b
         if record is None or record.screen_frame is None:
             return json_response("404 Not Found", {"error": "no screen frame"})
         frame = dict(record.screen_frame)
-        received_at = record.screen_last_seen
+        received_at = record.screen_frame_seen
     if received_at is not None:
         frame["receivedAt"] = received_at
         frame["ageMs"] = max(0, int((time.time() - received_at) * 1000))
@@ -1278,6 +1323,8 @@ async def handle_screen_device_ws(state: RelayState, reader: asyncio.StreamReade
             record.screen_device_writer = writer
             record.screen_device_lock = lock
             record.screen_info = info
+            record.screen_frame = None
+            record.screen_frame_seen = None
             record.screen_last_seen = time.time()
             record.last_seen = time.time()
             clients_record = record
@@ -1377,7 +1424,8 @@ async def handle_screen_browser_ws(state: RelayState, reader: asyncio.StreamRead
                 )
                 state.devices[install_id] = record
             record.screen_clients.add(client)
-            info = dict(record.screen_info) if record.screen_info else None
+            screen_live = record.screen_device_writer is not None and not record.screen_device_writer.is_closing()
+            info = dict(record.screen_info) if screen_live and record.screen_info else None
         if info is not None:
             await send_json(writer, client.lock, info)
         else:
@@ -1473,6 +1521,8 @@ async def handle_client(state: RelayState, reader: asyncio.StreamReader, writer:
             writer.write(await api_outline(state, parse_json_body(body)))
         elif path == "/api/screen/frame" and method.upper() == "POST":
             writer.write(await api_screen_frame(state, parse_json_body(body)))
+        elif path == "/api/screen/info" and method.upper() == "GET":
+            writer.write(await api_screen_info(state, query))
         elif path == "/api/screen/latest" and method.upper() == "GET":
             writer.write(await api_screen_latest(state, query))
         elif path == "/api/screen/stream" and method.upper() == "GET":

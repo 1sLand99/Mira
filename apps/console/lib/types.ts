@@ -78,6 +78,25 @@ export type ScreenVideoInfo = {
   receivedAt?: number;
 };
 
+export type ScreenInfoResponse = {
+  installId: string;
+  deviceName?: string;
+  address?: string;
+  available: boolean;
+  live: boolean;
+  inputAvailable: boolean;
+  decodePath?: string;
+  screenInfo?: ScreenVideoInfo | null;
+  screenLastSeen?: number | null;
+  screenAgeMs?: number | null;
+  latestFrame?: ScreenFrameMetadata | null;
+  viewerCount?: number;
+};
+
+export type ScreenInfoListResponse = {
+  screens: ScreenInfoResponse[];
+};
+
 export type MiraDevice = {
   type?: string;
   protocol?: number;
@@ -101,6 +120,7 @@ export type MiraDevice = {
   outlineLastSeen?: number;
   screenInfo?: ScreenVideoInfo | null;
   screenLastSeen?: number;
+  screen?: ScreenInfoResponse | null;
   metrics?: DeviceMetrics | null;
   metricsLastSeen?: number;
 };

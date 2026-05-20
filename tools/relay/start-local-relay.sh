@@ -21,6 +21,8 @@ Environment variables:
                     Android relay URL to advertise. Auto-detected by default.
   MIRA_LOCAL_BROWSER_URL
                     Browser URL printed for the computer, default http://localhost:<port>
+  MIRA_LAN_BROWSER_URL
+                    Browser URL printed for other LAN computers, default MIRA_LAN_RELAY_URL
   MIRA_SKIP_CONSOLE_BUILD
                     Set to 1 to skip building apps/console
   PYTHON_BIN        Python command, default python3
@@ -135,14 +137,18 @@ if [[ -z "${LAN_RELAY_URL}" ]]; then
 fi
 
 LOCAL_BROWSER_URL="${MIRA_LOCAL_BROWSER_URL:-http://localhost:${PORT}}"
+LAN_BROWSER_URL="${MIRA_LAN_BROWSER_URL:-${LAN_RELAY_URL}}"
 
 cat <<MSG
 
 Mira local relay is starting.
-Browser URL: ${LOCAL_BROWSER_URL}
+Local Browser URL: ${LOCAL_BROWSER_URL}
+LAN Browser URL: ${LAN_BROWSER_URL}
 Android Relay URL: ${LAN_RELAY_URL}
+Screen info API: ${LAN_BROWSER_URL%/}/api/screen/info
 
-Open Browser URL on this computer so WebCodecs runs in localhost secure context.
+Open Local Browser URL on this computer for WebCodecs secure-context playback.
+Open LAN Browser URL from other computers on the same Wi-Fi to access devices and screen metadata.
 Paste Android Relay URL into the Mira Android app on the same Wi-Fi.
 Press Ctrl-C to stop the local relay.
 

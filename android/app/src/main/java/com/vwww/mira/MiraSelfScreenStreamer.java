@@ -15,7 +15,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.net.URI;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -59,6 +58,11 @@ public final class MiraSelfScreenStreamer implements Closeable {
         workerThread.start();
     }
 
+    public boolean isAlive() {
+        Thread thread = workerThread;
+        return running.get() && thread != null && thread.isAlive();
+    }
+
     private void runLoop() {
         while (running.get()) {
             try {
@@ -70,9 +74,12 @@ public final class MiraSelfScreenStreamer implements Closeable {
                     continue;
                 }
                 VideoSize videoSize = chooseVideoSize(rootSize.width, rootSize.height);
+                configureEncoder(videoSize.width, videoSize.height);
+                if (!running.get()) break;
                 MiraWebSocketConnection connected = MiraWebSocketConnection.connect(screenDeviceWsUrl(relayUrl));
                 websocket = connected;
-                configureEncoder(videoSize.width, videoSize.height);
+                connected.sendJson(screenInfo(videoSize, rootSize));
+                Log.i(TAG, "screen video info sent codec=" + codecString + " size=" + videoSize.width + "x" + videoSize.height + " source=" + rootSize.width + "x" + rootSize.height);
                 encodeLoop(connected, videoSize, rootSize);
             } catch (Throwable throwable) {
                 if (running.get()) {
@@ -101,6 +108,7 @@ public final class MiraSelfScreenStreamer implements Closeable {
         codecConfig = null;
         MediaCodec nextEncoder = null;
         try {
+            Log.i(TAG, "configuring AVC encoder size=" + width + "x" + height + " bitrate=" + BITRATE + " fps=" + FRAME_RATE);
             nextEncoder = createEncoder(width, height, true);
         } catch (Throwable first) {
             if (nextEncoder != null) nextEncoder.release();
@@ -108,8 +116,11 @@ public final class MiraSelfScreenStreamer implements Closeable {
             nextEncoder = createEncoder(width, height, false);
         }
         encoder = nextEncoder;
+        Log.i(TAG, "creating AVC input surface");
         inputSurface = nextEncoder.createInputSurface();
+        Log.i(TAG, "starting AVC encoder");
         nextEncoder.start();
+        Log.i(TAG, "AVC encoder started size=" + width + "x" + height);
     }
 
     private MediaCodec createEncoder(int width, int height, boolean forceBaseline) throws Exception {
@@ -123,14 +134,17 @@ public final class MiraSelfScreenStreamer implements Closeable {
         }
         if (forceBaseline && Build.VERSION.SDK_INT >= 21) {
             format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline);
-            format.setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel3);
+            format.setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel31);
         }
         if (Build.VERSION.SDK_INT >= 23) {
             format.setInteger(MediaFormat.KEY_PRIORITY, 0);
         }
         MediaCodec codec = MediaCodec.createEncoderByType(MIME_AVC);
         try {
+            Log.i(TAG, "AVC codec created forceBaseline=" + forceBaseline + " format=" + format);
+            Log.i(TAG, "AVC codec configure begin forceBaseline=" + forceBaseline);
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            Log.i(TAG, "AVC codec configure ok forceBaseline=" + forceBaseline);
             return codec;
         } catch (Throwable throwable) {
             try {
@@ -202,7 +216,11 @@ public final class MiraSelfScreenStreamer implements Closeable {
                 if (keyFrame && codecConfig != null && codecConfig.length > 0 && findNalUnit(payload, 7) == null) {
                     payload = concat(codecConfig, payload);
                 }
-                connected.sendFrame(videoPacket(payload, keyFrame), 0x2);
+                byte[] packet = videoPacket(payload, keyFrame);
+                connected.sendFrame(packet, 0x2);
+                if (sequence == 1 || keyFrame) {
+                    Log.i(TAG, "screen frame sent seq=" + sequence + " key=" + keyFrame + " bytes=" + payload.length);
+                }
             }
             boolean ended = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
             currentEncoder.releaseOutputBuffer(outputIndex, false);

@@ -5,6 +5,8 @@ import type {
   ScreenFrameMetadata,
   ScreenInputRequest,
   ScreenInputResponse,
+  ScreenInfoListResponse,
+  ScreenInfoResponse,
   DeviceLogcatResponse,
   ServerLogsResponse,
 } from './types';
@@ -71,6 +73,14 @@ export function openSession(installId: string, cols: number, rows: number, cellW
 
 export function closeSession(sessionId: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>('/api/close', { sessionId });
+}
+
+export function screenInfo(installId: string): Promise<ScreenInfoResponse> {
+  return request<ScreenInfoResponse>(`/api/screen/info?installId=${encodeURIComponent(installId)}`);
+}
+
+export function listScreenInfo(): Promise<ScreenInfoListResponse> {
+  return request<ScreenInfoListResponse>('/api/screen/info');
 }
 
 export function latestScreenFrame(installId: string): Promise<ScreenFrame> {

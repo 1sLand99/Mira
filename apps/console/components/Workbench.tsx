@@ -305,6 +305,8 @@ function InfoPanel({
   addKnownRow(rows, 'Model', modelSummary(device));
   rows.push(['Device ID', shortId(device.installId, 36)]);
   addKnownRow(rows, 'Screen', screenStateText(device));
+  addKnownRow(rows, 'Screen Video', screenVideoText(device));
+  addKnownRow(rows, 'Screen Transport', screenTransportText(device));
   rows.push(...currentSurfaceRows(device, platform));
 
   return (
@@ -396,15 +398,53 @@ const androidReleaseByApi: Record<number, string> = {
 
 function screenSizeText(device: MiraDevice) {
   const outlineScreen = device.outline?.screen;
-  const info = device.screenInfo;
-  const width = positiveNumber(info?.sourceWidth) ?? positiveNumber(outlineScreen?.width) ?? positiveNumber(device.outline?.width);
-  const height = positiveNumber(info?.sourceHeight) ?? positiveNumber(outlineScreen?.height) ?? positiveNumber(device.outline?.height);
+  const info = device.screenInfo || device.screen?.screenInfo || null;
+  const latestFrame = device.screen?.latestFrame || null;
+  const width =
+    positiveNumber(info?.sourceWidth) ??
+    positiveNumber(latestFrame?.sourceWidth) ??
+    positiveNumber(outlineScreen?.width) ??
+    positiveNumber(device.outline?.width);
+  const height =
+    positiveNumber(info?.sourceHeight) ??
+    positiveNumber(latestFrame?.sourceHeight) ??
+    positiveNumber(outlineScreen?.height) ??
+    positiveNumber(device.outline?.height);
   return width && height ? `${width}x${height}` : null;
 }
 
 function screenStateText(device: MiraDevice) {
-  if (device.screenSource || device.screenInfo || device.screenLastSeen || device.outline) return 'on,unlocked';
+  const screen = device.screen;
+  if (screen?.live) return 'live';
+  if (screen?.available || device.screenInfo || device.screenLastSeen) return 'available';
+  if (device.screenSource || device.outline) return 'on,unlocked';
   return null;
+}
+
+function screenVideoText(device: MiraDevice) {
+  const info = device.screenInfo || device.screen?.screenInfo || null;
+  const latestFrame = device.screen?.latestFrame || null;
+  const width = positiveNumber(info?.width) ?? positiveNumber(latestFrame?.width);
+  const height = positiveNumber(info?.height) ?? positiveNumber(latestFrame?.height);
+  const codec = String(info?.codec || latestFrame?.format || '').trim();
+  const fps = positiveNumber(info?.fps);
+  const parts = [codec, width && height ? `${width}x${height}` : '', fps ? `${fps}fps` : ''].filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
+}
+
+function screenTransportText(device: MiraDevice) {
+  const info = device.screenInfo || device.screen?.screenInfo || null;
+  const transport = String(info?.transport || '').trim();
+  const viewerCount = device.screen?.viewerCount;
+  const ageMs = positiveNumber(device.screen?.screenAgeMs);
+  const parts = [transport, typeof viewerCount === 'number' ? `${viewerCount} viewer${viewerCount === 1 ? '' : 's'}` : '', ageMs !== null ? `age ${formatAge(ageMs)}` : ''].filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
+}
+
+function formatAge(ageMs: number) {
+  if (ageMs < 1000) return `${ageMs}ms`;
+  if (ageMs < 60000) return `${Math.round(ageMs / 1000)}s`;
+  return `${Math.round(ageMs / 60000)}m`;
 }
 
 function currentSurfaceRows(device: MiraDevice, platform: DevicePlatform): Array<[string, string]> {

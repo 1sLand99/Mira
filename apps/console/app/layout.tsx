@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import '@xterm/xterm/css/xterm.css';
 import './globals.css';
 
@@ -10,7 +11,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <Script src="/vendor/h264decoder.js" strategy="beforeInteractive" />
+        {children}
+      </body>
     </html>
   );
 }

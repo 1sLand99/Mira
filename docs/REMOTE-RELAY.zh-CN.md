@@ -108,14 +108,18 @@ MIRA_PUBLIC_URL=https://xxxx.r36.cpolar.top ./mira-web
 ./mira-local-web
 ```
 
-脚本会自动打印两个地址:
+脚本会自动打印四个地址:
 
 ```text
-Browser URL: http://localhost:8765
+Local Browser URL: http://localhost:8765
+LAN Browser URL: http://<电脑局域网IP>:8765
 Android Relay URL: http://<电脑局域网IP>:8765
+Screen info API: http://<电脑局域网IP>:8765/api/screen/info
 ```
 
-电脑浏览器应该打开 `Browser URL`, 也就是 `localhost` 地址。这样 WebCodecs(网页编解码接口) 可以在 localhost secure context(本机安全上下文) 中启用, 远程画面 H.264(视频编码格式) 解码才可用。
+电脑本机浏览器优先打开 `Local Browser URL`, 也就是 `localhost` 地址。这样 WebCodecs(网页编解码接口) 可以在 localhost secure context(本机安全上下文) 中启用, 远程画面 H.264(视频编码格式) 解码才可用。
+
+同一 Wi-Fi(无线局域网) 里的其他电脑可以打开 `LAN Browser URL` 查看设备列表和投屏 metadata(元数据)。投屏视频仍由 Android App(安卓应用) 上传 H.264(视频编码格式) 数据, Relay(中继服务) 只负责转发视频流并缓存元数据, 局域网浏览器在 WebCodecs(网页编解码接口) 不可用时使用内置 WebAssembly(网页汇编运行时) 解码器解码。如果只需要脚本或外部工具读取投屏信息, 直接请求 `Screen info API`, 或按设备请求 `/api/screen/info?installId=<install-id>`。
 
 Android App(安卓应用) 首页填写 `Android Relay URL`, 也就是电脑局域网 IP(网络地址)。手机不能填写 `localhost`, 因为手机上的 localhost 指向手机自己。
 
