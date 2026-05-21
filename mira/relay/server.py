@@ -41,6 +41,7 @@ MAX_SCREEN_INPUT_TEXT = 20_000
 SCREEN_STREAM_BOUNDARY = "mira-screen-frame"
 SESSION_ATTACH_GRACE_SECONDS = 5.0
 SERVER_LOG_LIMIT = 2000
+SCREEN_BROADCAST_TIMEOUT_SECONDS = 0.5
 _SERVER_LOG_LOCK = threading.Lock()
 _SERVER_LOG_SEQ = 0
 _SERVER_LOG_RING: deque[dict[str, Any]] = deque(maxlen=SERVER_LOG_LIMIT)
@@ -112,6 +113,11 @@ class DeviceRecord:
     screen_device_writer: asyncio.StreamWriter | None = None
     screen_device_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     screen_clients: set[BrowserClient] = field(default_factory=set)
+    screen_video_packets: int = 0
+    screen_video_bytes: int = 0
+    screen_video_last_packet_at: float | None = None
+    screen_video_last_broadcast_ms: float | None = None
+    screen_video_broadcast_timeouts: int = 0
     control_writer: asyncio.StreamWriter | None = None
     control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -326,15 +332,30 @@ async def broadcast_session(session: RelaySession, message: dict[str, Any]) -> N
         session.browsers.discard(browser)
 
 
-async def broadcast_screen_clients(record: DeviceRecord, payload: dict[str, Any] | bytes, opcode: int = 0x1) -> None:
+async def broadcast_screen_clients(record: DeviceRecord, payload: dict[str, Any] | bytes, opcode: int = 0x1) -> dict[str, int]:
     dead: list[BrowserClient] = []
+    sent = 0
+    timeouts = 0
     if isinstance(payload, dict):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     else:
         data = payload
     for browser in list(record.screen_clients):
         try:
-            await send_frame(browser.writer, data, opcode=opcode, lock=browser.lock)
+            if opcode == 0x2:
+                await asyncio.wait_for(
+                    send_frame(browser.writer, data, opcode=opcode, lock=browser.lock),
+                    timeout=SCREEN_BROADCAST_TIMEOUT_SECONDS,
+                )
+            else:
+                await send_frame(browser.writer, data, opcode=opcode, lock=browser.lock)
+            sent += 1
+        except asyncio.TimeoutError:
+            timeouts += 1
+            relay_log(
+                f"Broadcast to screen browser timed out installId={record.install_id} opcode={opcode} timeout={SCREEN_BROADCAST_TIMEOUT_SECONDS:.1f}s"
+            )
+            dead.append(browser)
         except Exception as exc:
             relay_log(
                 f"Broadcast to screen browser failed installId={record.install_id} opcode={opcode} error={relay_exc_text(exc)}"
@@ -342,6 +363,11 @@ async def broadcast_screen_clients(record: DeviceRecord, payload: dict[str, Any]
             dead.append(browser)
     for browser in dead:
         record.screen_clients.discard(browser)
+        try:
+            browser.writer.close()
+        except Exception:
+            pass
+    return {"sent": sent, "timeouts": timeouts}
 
 
 def screen_input_payload(body: dict[str, Any], install_id: str) -> tuple[dict[str, Any] | None, str]:
@@ -495,6 +521,11 @@ def screen_info_payload(record: DeviceRecord, now: float | None = None) -> dict[
         "screenInfo": screen_info,
         "screenLastSeen": record.screen_last_seen,
         "screenAgeMs": screen_age_ms,
+        "videoPackets": record.screen_video_packets,
+        "videoBytes": record.screen_video_bytes,
+        "videoLastPacketAt": record.screen_video_last_packet_at,
+        "videoLastBroadcastMs": record.screen_video_last_broadcast_ms,
+        "videoBroadcastTimeouts": record.screen_video_broadcast_timeouts,
         "latestFrame": latest_frame,
         "viewerCount": len(record.screen_clients),
     }
@@ -1342,6 +1373,11 @@ async def handle_screen_device_ws(state: RelayState, reader: asyncio.StreamReade
             record.screen_frame = None
             record.screen_frame_seen = None
             record.screen_last_seen = time.time()
+            record.screen_video_packets = 0
+            record.screen_video_bytes = 0
+            record.screen_video_last_packet_at = None
+            record.screen_video_last_broadcast_ms = None
+            record.screen_video_broadcast_timeouts = 0
             record.last_seen = time.time()
             clients_record = record
         await broadcast_screen_clients(clients_record, info)
@@ -1375,14 +1411,25 @@ async def handle_screen_device_ws(state: RelayState, reader: asyncio.StreamReade
                 continue
             if not frame.is_binary:
                 continue
+            packet_received_at = time.time()
+            packet_size = len(frame.payload)
             async with state.lock:
                 record = state.devices.get(install_id)
                 if record is None:
                     continue
-                record.screen_last_seen = time.time()
-                record.last_seen = time.time()
+                record.screen_last_seen = packet_received_at
+                record.last_seen = packet_received_at
+                record.screen_video_packets += 1
+                record.screen_video_bytes += packet_size
+                record.screen_video_last_packet_at = packet_received_at
                 clients_record = record
-            await broadcast_screen_clients(clients_record, frame.payload, opcode=0x2)
+            broadcast_started = time.perf_counter()
+            broadcast_stats = await broadcast_screen_clients(clients_record, frame.payload, opcode=0x2)
+            broadcast_ms = (time.perf_counter() - broadcast_started) * 1000
+            async with state.lock:
+                if record := state.devices.get(install_id):
+                    record.screen_video_last_broadcast_ms = broadcast_ms
+                    record.screen_video_broadcast_timeouts += int(broadcast_stats.get("timeouts") or 0)
     except (WebSocketClosed, asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError) as exc:
         relay_log(f"Screen device websocket disconnected installId={install_id or '-'} peer={peer} error={relay_exc_text(exc)}")
     finally:

@@ -25,7 +25,9 @@ xcodebuild \
 4. `libbsm` `ldl` `lresolv` 这些链接项不要为了表面报错直接删掉, 它们很可能属于 iSH / Frida 兼容链路.
 5. `idb` 已验证可以连上真机并完成安装启动, 推荐顺序是 `idb connect` -> `idb install --udid` -> `idb launch --udid`.
 6. `idb launch` 传启动环境变量时, 直接使用 `IDB_` 前缀, 启动到 App 内后会去掉前缀.
-7. 当前已验证可工作的自动启动示例:
+7. 真机后续安装验证必须坚持覆盖安装, 不要先卸载 App. iOS 提示“在删除该开发者所有 App 之前将继续信任”说明开发者信任态会随该开发者 App 保留, 先卸载可能清掉信任态并导致后续启动报 invalid code signature 或 profile has not been explicitly trusted.
+8. 如果安装工具遇到内部安装错误, 默认不要自动 uninstall 重试. 只有用户明确确认可以丢失信任态和 App 容器数据时, 才允许设置脚本显式开关执行卸载重装.
+9. 当前已验证可工作的自动启动示例:
 
 ```bash
 idb connect <device-udid>

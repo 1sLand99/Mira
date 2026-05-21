@@ -16,6 +16,7 @@ HOST_RELAY_PORT="${MIRA_IOS_HOST_RELAY_PORT:-8765}"
 RELAY_LOG_PATH="${MIRA_IOS_RELAY_LOG_PATH:-${ROOT_DIR}/build/mira-local-relay.log}"
 OPEN_URL="${MIRA_IOS_OPEN_URL:-http://127.0.0.1:${HOST_RELAY_PORT}}"
 VERIFY_RELAY_REGISTRATION="${MIRA_IOS_VERIFY_RELAY_REGISTRATION:-1}"
+ALLOW_UNINSTALL="${MIRA_IOS_ALLOW_UNINSTALL:-0}"
 SIM_DERIVED_DATA="${MIRA_IOS_SIM_DERIVED_DATA:-${ROOT_DIR}/build/ios/DerivedData}"
 SIM_APP_PATH="${SIM_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/Mira.app"
 DEVICE_DERIVED_DATA="${MIRA_IOS_DEVICE_DERIVED_DATA:-${ROOT_DIR}/build/ios-mira-device-native-relay-derived}"
@@ -44,6 +45,7 @@ Environment variables:
   MIRA_IOS_RELAY_LOG_PATH Log file for auto-started local relay
   MIRA_IOS_OPEN_URL     Browser URL to open on this computer. Default http://127.0.0.1:<relay-port>
   MIRA_IOS_VERIFY_RELAY_REGISTRATION  1 to check whether the iOS app registered with Relay after launch. Default 1
+  MIRA_IOS_ALLOW_UNINSTALL  1 to allow uninstall/reinstall fallback on physical devices. Default 0 to preserve developer trust
   MIRA_IOS_DEVICE       Simulator device name. Default iPhone 17 Pro
   MIRA_IOS_SCHEME       Xcode scheme. Default Mira
   MIRA_IOS_BUNDLE_ID    Bundle identifier. Default com.vwww.mira.ios
@@ -409,7 +411,16 @@ install_device_app() {
   fi
 
   if [[ "${output}" == *"0xe8000067"* || "${output}" == *"internal API error"* ]]; then
-    echo "Install hit internal API error, retrying after uninstall ..." >&2
+    if [[ "${ALLOW_UNINSTALL}" != "1" ]]; then
+      cat >&2 <<MSG
+Install hit internal API error, but uninstall fallback is disabled.
+Keeping the existing app installed preserves the trusted developer state on physical iOS devices.
+Use a plain overlay install after resolving the install issue, or set MIRA_IOS_ALLOW_UNINSTALL=1 only when you accept losing trust state and app container data.
+MSG
+      return "${status}"
+    fi
+
+    echo "Install hit internal API error, retrying after uninstall because MIRA_IOS_ALLOW_UNINSTALL=1 ..." >&2
     "${ios_deploy}" \
       --id "${device_id}" \
       --bundle_id "${bundle_id}" \
@@ -560,7 +571,7 @@ run_device() {
     --kill \
     --faster-path-search >/dev/null 2>&1 || true
 
-  echo "Installing Mira app with ios-deploy ..."
+  echo "Installing Mira app with ios-deploy using overlay install to preserve trusted developer state ..."
   install_device_app "${ios_deploy}" "${device_id}" "${DEVICE_APP_PATH}" "${BUNDLE_ID}"
 
   if [[ "${AUTO_LAUNCH_DEVICE}" == "1" ]]; then

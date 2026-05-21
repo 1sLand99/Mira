@@ -10,6 +10,8 @@ private let miraPacketHeaderBytes = 20
 private let miraScreenFrameRate: Int32 = 10
 private let miraScreenMaxWidth = 540
 private let miraScreenBitrate = 220_000
+private let miraScreenMaxSendInFlight = 1
+private let miraScreenStatsInterval: TimeInterval = 5
 
 @MainActor
 private func miraCurrentDeviceNameOnMainActor() -> String {
@@ -134,10 +136,24 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
     private var codecString = "avc1.42E01E"
     private var sentCodecString = ""
     private var timer: DispatchSourceTimer?
+    private var pixelBufferPool: CVPixelBufferPool?
     private var encodedSize = CGSize(width: 1, height: 1)
     private var sourceSize = CGSize(width: 1, height: 1)
     private var lastRenderFailureReason = ""
     private var socketOpen = false
+    private var encodeInFlight = false
+    private var sendInFlight = 0
+    private var reconnectScheduled = false
+    private var connectionGeneration: UInt64 = 0
+    private var statsWindowStartedAt = Date()
+    private var statsCaptured = 0
+    private var statsEncoded = 0
+    private var statsSent = 0
+    private var statsSkippedBackpressure = 0
+    private var statsSendSlow = 0
+    private var statsEncodeFailures = 0
+    private var maxRenderMs: Double = 0
+    private var maxSendMs: Double = 0
 
     init(screenState: MiraRemoteScreenState) {
         self.screenState = screenState
@@ -165,6 +181,8 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
     private func stopOnQueue() {
         running = false
         socketOpen = false
+        reconnectScheduled = false
+        connectionGeneration &+= 1
         timer?.cancel()
         timer = nil
         if let compressionSession {
@@ -172,6 +190,9 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
             VTCompressionSessionInvalidate(compressionSession)
         }
         compressionSession = nil
+        pixelBufferPool = nil
+        encodeInFlight = false
+        sendInFlight = 0
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         session?.invalidateAndCancel()
@@ -180,6 +201,8 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
 
     private func connectAndStream() {
         guard running else { return }
+        connectionGeneration &+= 1
+        let generation = connectionGeneration
         guard let url = URL(string: screenDeviceWebSocketURL(relayURL)) else {
             miraRelayDeviceLog(level: "ERROR", scope: "screen.stream", message: "invalid screen relay url", details: ["relayURL": relayURL])
             scheduleReconnect(reason: "invalid relay url")
@@ -193,22 +216,35 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
         session = nextSession
         socket = nextSocket
         socketOpen = false
+        encodeInFlight = false
+        sendInFlight = 0
         nextSocket.resume()
+        miraRelayDeviceLog(level: "INFO", scope: "screen.stream", message: "screen websocket connecting", details: ["generation": Int(generation)])
         receiveLoop(task: nextSocket)
     }
 
     private func scheduleReconnect(reason: String) {
         guard running else { return }
+        guard !reconnectScheduled else { return }
+        reconnectScheduled = true
+        let generation = connectionGeneration
         miraRelayDeviceLog(level: "WARN", scope: "screen.stream", message: "schedule reconnect", details: ["reason": reason])
         timer?.cancel()
         timer = nil
         queue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self, self.running else { return }
+            guard self.connectionGeneration == generation else {
+                self.reconnectScheduled = false
+                return
+            }
             self.socketOpen = false
+            self.encodeInFlight = false
+            self.sendInFlight = 0
             self.socket?.cancel(with: .goingAway, reason: nil)
             self.session?.invalidateAndCancel()
             self.socket = nil
             self.session = nil
+            self.reconnectScheduled = false
             self.connectAndStream()
         }
     }
@@ -287,10 +323,16 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
         VTSessionSetProperty(nextSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: miraScreenBitrate))
         VTCompressionSessionPrepareToEncodeFrames(nextSession)
         compressionSession = nextSession
+        configurePixelBufferPool(width: Int(width), height: Int(height))
     }
 
     private func captureAndEncodeFrame() {
         guard running, socketOpen, let compressionSession else { return }
+        guard !encodeInFlight, sendInFlight < miraScreenMaxSendInFlight else {
+            statsSkippedBackpressure += 1
+            maybeLogStats()
+            return
+        }
         let sizes = captureSizes()
         if abs(sizes.encoded.width - encodedSize.width) > 0.5 || abs(sizes.encoded.height - encodedSize.height) > 0.5 {
             sourceSize = sizes.source
@@ -306,13 +348,17 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
             logRenderFailureOnce("pixel buffer unavailable", details: ["width": Int(encodedSize.width), "height": Int(encodedSize.height)])
             return
         }
+        let renderStarted = Date()
         guard renderWindow(into: pixelBuffer, source: sizes.source, encoded: sizes.encoded) else { return }
+        maxRenderMs = max(maxRenderMs, Date().timeIntervalSince(renderStarted) * 1000)
         lastRenderFailureReason = ""
         flipPixelBufferVertically(pixelBuffer, height: Int(encodedSize.height))
         sequence &+= 1
         let timestamp = CMTime(value: CMTimeValue(sequence), timescale: miraScreenFrameRate)
         let duration = CMTime(value: 1, timescale: miraScreenFrameRate)
-        VTCompressionSessionEncodeFrame(
+        encodeInFlight = true
+        statsCaptured += 1
+        let status = VTCompressionSessionEncodeFrame(
             compressionSession,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: timestamp,
@@ -321,11 +367,20 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
             sourceFrameRefcon: nil,
             infoFlagsOut: nil
         )
+        if status != noErr {
+            encodeInFlight = false
+            statsEncodeFailures += 1
+            miraRelayDeviceLog(level: "WARN", scope: "screen.encoder", message: "encode frame failed", details: ["status": Int(status)])
+        }
+        maybeLogStats()
     }
 
-    fileprivate func handleEncodedSample(_ sampleBuffer: CMSampleBuffer) {
+    fileprivate func handleEncodedSample(_ retainedSampleBuffer: Unmanaged<CMSampleBuffer>) {
         queue.async { [weak self] in
+            let sampleBuffer = retainedSampleBuffer.takeRetainedValue()
             guard let self, self.running else { return }
+            self.encodeInFlight = false
+            self.statsEncoded += 1
             let keyFrame = sampleBuffer.isKeyFrame
             if keyFrame, let format = CMSampleBufferGetFormatDescription(sampleBuffer) {
                 let spsPps = h264ParameterSets(formatDescription: format)
@@ -338,9 +393,39 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
             }
             guard let payload = annexBData(sampleBuffer: sampleBuffer) else { return }
             let packet = videoPacket(payload: payload, keyFrame: keyFrame, seq: self.sequence)
-            self.socket?.send(.data(packet)) { [weak self] error in
-                guard let error else { return }
-                self?.queue.async { self?.scheduleReconnect(reason: "send packet failed: \(error.localizedDescription)") }
+            guard let socket = self.socket, self.socketOpen else { return }
+            self.sendInFlight += 1
+            let sendStarted = Date()
+            socket.send(.data(packet)) { [weak self, weak socket] error in
+                self?.queue.async {
+                    guard let self, let socket, self.socket === socket else { return }
+                    self.sendInFlight = max(0, self.sendInFlight - 1)
+                    let sendMs = Date().timeIntervalSince(sendStarted) * 1000
+                    self.maxSendMs = max(self.maxSendMs, sendMs)
+                    if sendMs > 250 {
+                        self.statsSendSlow += 1
+                    }
+                    if let error {
+                        self.scheduleReconnect(reason: "send packet failed: \(error.localizedDescription)")
+                        return
+                    }
+                    self.statsSent += 1
+                    self.maybeLogStats()
+                }
+            }
+        }
+    }
+
+    fileprivate func handleEncodeCallback(status: OSStatus) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.encodeInFlight = false
+            if self.running {
+                self.statsEncodeFailures += 1
+                self.maybeLogStats()
+                if status != noErr {
+                    miraRelayDeviceLog(level: "WARN", scope: "screen.encoder", message: "encode callback dropped frame", details: ["status": Int(status)])
+                }
             }
         }
     }
@@ -389,7 +474,32 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
         return (source, CGSize(width: width - (width % 2), height: height - (height % 2)))
     }
 
+    private func configurePixelBufferPool(width: Int, height: Int) {
+        pixelBufferPool = nil
+        let poolAttributes = [
+            kCVPixelBufferPoolMinimumBufferCountKey: 3,
+        ] as CFDictionary
+        let pixelBufferAttributes: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey: width,
+            kCVPixelBufferHeightKey: height,
+            kCVPixelBufferCGImageCompatibilityKey: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+            kCVPixelBufferIOSurfacePropertiesKey: [:],
+        ]
+        var pool: CVPixelBufferPool?
+        if CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttributes, pixelBufferAttributes as CFDictionary, &pool) == kCVReturnSuccess {
+            pixelBufferPool = pool
+        }
+    }
+
     private func makePixelBuffer(width: Int, height: Int) -> CVPixelBuffer? {
+        if let pixelBufferPool {
+            var buffer: CVPixelBuffer?
+            if CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pixelBufferPool, &buffer) == kCVReturnSuccess {
+                return buffer
+            }
+        }
         var buffer: CVPixelBuffer?
         let attributes: [CFString: Any] = [
             kCVPixelBufferCGImageCompatibilityKey: true,
@@ -434,11 +544,7 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
             UIGraphicsPushContext(context)
             context.saveGState()
             context.scaleBy(x: encoded.width / max(1, source.width), y: encoded.height / max(1, source.height))
-            let rendered = window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
-            if !rendered {
-                self.logRenderFailureOnce("drawHierarchy returned false, fallback to layer.render", details: ["windowClass": String(describing: type(of: window))])
-                window.layer.render(in: context)
-            }
+            (window.layer.presentation() ?? window.layer).render(in: context)
             context.restoreGState()
             UIGraphicsPopContext()
             ok = true
@@ -472,6 +578,33 @@ final class MiraRemoteScreenStreamer: NSObject, URLSessionWebSocketDelegate, @un
             top += 1
             bottom -= 1
         }
+    }
+
+    private func maybeLogStats(force: Bool = false) {
+        let elapsed = Date().timeIntervalSince(statsWindowStartedAt)
+        guard force || elapsed >= miraScreenStatsInterval else { return }
+        let details: [String: Any] = [
+            "captured": statsCaptured,
+            "encoded": statsEncoded,
+            "sent": statsSent,
+            "skippedBackpressure": statsSkippedBackpressure,
+            "sendSlow": statsSendSlow,
+            "encodeFailures": statsEncodeFailures,
+            "sendInFlight": sendInFlight,
+            "encodeInFlight": encodeInFlight,
+            "maxRenderMs": Int(maxRenderMs.rounded()),
+            "maxSendMs": Int(maxSendMs.rounded()),
+        ]
+        miraRelayDeviceLog(level: "INFO", scope: "screen.stats", message: "screen stream stats", details: details)
+        statsWindowStartedAt = Date()
+        statsCaptured = 0
+        statsEncoded = 0
+        statsSent = 0
+        statsSkippedBackpressure = 0
+        statsSendSlow = 0
+        statsEncodeFailures = 0
+        maxRenderMs = 0
+        maxSendMs = 0
     }
 
     private func screenDeviceWebSocketURL(_ value: String) -> String {
@@ -521,9 +654,13 @@ extension MiraRemoteScreenStreamer {
 }
 
 private let miraCompressionOutputCallback: VTCompressionOutputCallback = { refcon, _, status, _, sampleBuffer in
-    guard status == noErr, let refcon, let sampleBuffer, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+    guard let refcon else { return }
     let streamer = Unmanaged<MiraRemoteScreenStreamer>.fromOpaque(refcon).takeUnretainedValue()
-    streamer.handleEncodedSample(sampleBuffer)
+    guard status == noErr, let sampleBuffer, CMSampleBufferDataIsReady(sampleBuffer) else {
+        streamer.handleEncodeCallback(status: status)
+        return
+    }
+    streamer.handleEncodedSample(Unmanaged.passRetained(sampleBuffer))
 }
 
 final class MiraDeviceMetricsSampler: @unchecked Sendable {
