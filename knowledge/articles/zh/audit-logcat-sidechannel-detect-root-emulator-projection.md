@@ -16,11 +16,11 @@
 2. 模拟器环境: 通过 `qemu_props`, `goldfish`, `ranchu` 相关安全域观察模拟器特征
 3. 疑似正在投屏: 通过高 PID 的连续 `u:r:shell:s0` 安全域发现疑似 scrcpy 正在投屏
 
-依旧是使用 [Mira](https://github.com/vwww-droid/Mira) 框架进行运行时风险分析. 
+依旧是使用 [Mira](https://github.com/vwww-droid/Mira) 开源框架进行运行时风险分析. 介绍在 [看雪论坛这篇文章](https://bbs.kanxue.com/thread-291041.htm).
 
 相对于不断打包安装和触发, Mira 只需 AI 自行对 shell 脚本不断进行微调和执行即可. 比如这次的改 PID 范围, 改 logcat 匹配规则, 改扫描窗口, 很快, 很省精力.
 
-**泄露与修复的原理及相关分析放在文末.**
+**文末为原理, 修复, 以及绕过方案.**
 
 ## 复现
 
@@ -117,7 +117,7 @@ no_shell_domain_hit
 
 正常用户即使开启 adb, 不用 scrcpy 投屏也不会有这个特征, **因此连续 3 个 `u:r:shell:s0`** 可以作为判断正疑似使用 scrcpy 投屏的策略, 具体需要线上环境验证, 这里只是提供一个思路
 
-若想隐藏, 要么使用修复后系统, 要么就是 root 后写插件将这部分泄露 hook 掉, 但往往都会引入新的特征
+若想隐藏, 要么使用修复后系统, 要么就是得 root 设备然后 hook 系统框架将这部分改掉, 但就会引入新的特征进入 root 对抗的范畴. 提高攻击方的成本.
 
 ## 注意事项
 
@@ -280,6 +280,74 @@ avc: denied { getattr } for comm="sh" path="/proc/1030" dev="proc" ... scontext=
 
 AOSP SELinux 文档说明, SELinux denial 会进入 `dmesg` 和 `logcat`, 并且 `scontext`, `tcontext`, `tclass` 分别描述发起方, 目标方和目标对象类型. 也就是说, audit 日志的设计目标是帮助系统开发者定位策略问题, 但在特定日志可见性条件下, 它也可能成为信息侧信道. 
 
+
+## 绕过
+
+### ZN-AuditPatch
+
+[ZN-AuditPatch](https://github.com/aviraxp/ZN-AuditPatch) 的实现思路是对已知 root 相关 `tcontext` 做替换, 例如代码中针对 `magisk` 和 `su` 过滤, 并替换为固定的 `tcontext=u:r:priv_app:s0:c512,c768`.
+
+```c
+constexpr std::string_view target_context = "tcontext=u:r:priv_app:s0:c512,c768";
+constexpr std::string_view source_contexts[] = {
+        "tcontext=u:r:su:s0",
+        "tcontext=u:r:magisk:s0"
+};
+```
+
+这种解法在检测面泛化之后不太够用. 第三方 App 仍然可以发现其他安全域特征, 也可以反过来把固定的 `tcontext=u:r:priv_app:s0:c512,c768` 当成检测特征.
+
+### PatchAudit
+
+[PatchAudit](https://github.com/vwww-droid/PatchAudit) 参考了 ZN-AuditPatch 的方向, 但做了两个调整.
+
+第一, 不再只匹配 `magisk` 和 `su`, 而是只要是带有 `tcontext=` 的 procfs audit, 并且满足 `dev="proc"` 或 `path="/proc/"`, 就统一改写目标上下文.
+
+```c
+static bool is_procfs_audit_with_target_context(const char *message) {
+    if (message == NULL) {
+        return false;
+    }
+
+    const bool has_tcontext = contains(message, "tcontext=");
+    const bool is_procfs =
+        contains(message, "dev=\"proc\"") ||
+        contains(message, "path=\"/proc/");
+
+    return has_tcontext && is_procfs;
+}
+```
+
+第二, 替换后的 `priv_app` MLS 类别不使用固定值, 而是在本次 `logd` 生命周期内生成一个稳定的随机组合.
+
+```c
+static char g_fake_tcontext[64] = "u:r:priv_app:s0:c512,c768";
+
+static void init_fake_tcontext(void) {
+    const uint32_t low = make_seed() & 0xffU;
+    const uint32_t high = low + 256U;
+
+    snprintf(
+        g_fake_tcontext,
+        sizeof(g_fake_tcontext),
+        "u:r:priv_app:s0:c%u,c%u,c512,c768",
+        low,
+        high
+    );
+}
+```
+
+这个值不是每条日志都变, 而是本次 `logd` 生命周期内稳定. 这样比逐条随机更自然, 也避免制造高频变化特征.
+
+实测在 arm64 root 机器上可以隐藏本文提到的 procfs audit 侧信道. 但如果 scrcpy 场景没有 root 介入, 仍然会暴露高 PID `u:r:shell:s0` 聚集特征, 所以这个检测方案仍然有实际价值.
+
+```diff
+- tcontext=u:r:magisk:s0
++ tcontext=u:r:priv_app:s0:c115,c371,c512,c768
+```
+
+其他机器没有系统性测试, 如果有问题可以到 PatchAudit 提 issue.
+
 ## 沉淀记录
 
 本文基于以下 Mira case 沉淀:
@@ -301,3 +369,5 @@ Mira 在这里主要是一个调试入口. 检测点不用固化进 App, 先用 
 1. AOSP Gerrit: [Hide procfs related audit messages from appdomain](https://android-review.googlesource.com/c/platform/system/logging/+/3725346)
 2. AOSP Docs: [Validate SELinux](https://source.android.com/docs/security/features/selinux/validate)
 3. AOSP Docs: [Understand logging](https://source.android.com/docs/core/tests/debug/understanding-logging)
+4. [ZN-AuditPatch](https://github.com/aviraxp/ZN-AuditPatch)
+5. [PatchAudit](https://github.com/vwww-droid/PatchAudit)

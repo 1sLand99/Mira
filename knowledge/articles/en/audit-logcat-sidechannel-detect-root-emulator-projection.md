@@ -1,10 +1,13 @@
-# Detecting root, emulators, and scrcpy-like projection through the audit logcat side channel
+---
+title: Detecting root, emulators, and scrcpy-like projection through an Android audit-log side channel
+description: How procfs-triggered SELinux audit logs can leak target process domains through logcat, and how that signal can detect Magisk, Android emulators, and scrcpy-like projection.
+tags: android, security, reverseengineering, mobile
+published: false
+---
 
 ## Overview
 
-[Hide procfs related audit messages from appdomain](https://android-review.googlesource.com/c/platform/system/logging/+/3725346)
-
-The AOSP change above fixes an audit log information leak.
+This post is about an Android audit-log information leak fixed by the AOSP change [Hide procfs related audit messages from appdomain](https://android-review.googlesource.com/c/platform/system/logging/+/3725346).
 
 Inside a restricted third-party Android app sandbox, even when the app cannot directly read another process under `/proc/<pid>`, touching procfs may trigger SELinux audit logs. If those logs are visible through logcat, the `tcontext` field can reveal the SELinux domain of the target process.
 
@@ -16,11 +19,11 @@ I tried three scenarios with this idea:
 2. Emulator environment: observe emulator traits through `qemu_props`, `goldfish`, and `ranchu` related domains.
 3. Possible active screen projection: observe consecutive high-PID `u:r:shell:s0` targets that look like scrcpy-driven shell automation.
 
-The experiments use the [Mira](https://github.com/vwww-droid/Mira) framework for runtime risk analysis.
+The experiments use the open-source [Mira](https://github.com/vwww-droid/Mira) framework for runtime risk analysis. A Chinese introduction to Mira is available in [this Kanxue article](https://bbs.kanxue.com/thread-291041.htm).
 
 Compared with repeatedly packaging, installing, and triggering an app, Mira lets an AI iterate shell probes directly. For this research, tuning PID ranges, logcat match rules, and scan windows was quick and low effort.
 
-**The leak mechanism, AOSP path, and patch analysis are at the end of this article.**
+**The leak mechanism, AOSP fix, and evasion discussion are at the end of this article.**
 
 ## Reproduction
 
@@ -42,7 +45,7 @@ hit_window=1025-1049
 05-20 21:48:56.219 ... avc: denied { getattr } for comm="sh" path="/proc/1048" dev="proc" ... scontext=u:r:untrusted_app_27:s0:... tcontext=u:r:magisk:s0 tclass=dir permissive=0 app=com.vwww.mira
 ```
 
-![Screenshot](../../../i/image-1.png)
+![Screenshot](https://raw.githubusercontent.com/vwww-droid/Mira/main/i/image-1.png)
 
 After the app sandbox touches procfs, the audit log directly exposes `tcontext=u:r:magisk:s0`.
 
@@ -63,7 +66,7 @@ emu64a:/ $
 
 Then probe it. The `qemu_props` trait appears.
 
-![Screenshot](../../../i/image-2.png)
+![Screenshot](https://raw.githubusercontent.com/vwww-droid/Mira/main/i/image-2.png)
 
 Other emulator-related candidates can also be found:
 
@@ -82,7 +85,7 @@ emu64a:/ $
 
 These are less obvious than `qemu`, but they can also be triggered in some images.
 
-![Screenshot](../../../i/image-3.png)
+![Screenshot](https://raw.githubusercontent.com/vwww-droid/Mira/main/i/image-3.png)
 
 ### scrcpy projection
 
@@ -106,7 +109,7 @@ shell        27800 27771 13609408 102484 pipe_read          0 S app_process
 
 The audit log does not directly expose `app_process`, but it can show several nearby high-PID targets with `u:r:shell:s0`.
 
-![Screenshot](../../../i/image-4.png)
+![Screenshot](https://raw.githubusercontent.com/vwww-droid/Mira/main/i/image-4.png)
 
 The start-stop comparison also matched expectations. After stopping projection, scanning the same high-PID range returned:
 
@@ -117,7 +120,7 @@ no_shell_domain_hit
 
 A normal user with adb enabled but without scrcpy projection usually will not have this high-PID cluster. Therefore, **three consecutive nearby `u:r:shell:s0` targets** can be used as a strategy for detecting suspected scrcpy-like projection. This still needs online-environment validation. Here it is presented as a research direction.
 
-To hide this trace, one would need either a patched system or a root-level plugin to hook this leak path. Both approaches often introduce new traits.
+To hide this trace, one would need either a patched system or a root-level plugin to hook this framework path. That moves the problem into root-evasion territory and often introduces new traits, raising the attacker's cost.
 
 ## Notes
 
@@ -281,9 +284,77 @@ Key fields:
 
 AOSP SELinux docs state that SELinux denials enter `dmesg` and `logcat`, and that `scontext`, `tcontext`, and `tclass` describe the source, target, and target object class. The design goal is to help system developers debug policy issues, but under certain log visibility conditions it becomes an information side channel.
 
-## Records
 
-This article is derived from the following Mira cases:
+## Evasion and patching
+
+### ZN-AuditPatch
+
+[ZN-AuditPatch](https://github.com/aviraxp/ZN-AuditPatch) filters known root-related target contexts such as `magisk` and `su`, then rewrites them into a fixed `priv_app` context.
+
+```c
+constexpr std::string_view target_context = "tcontext=u:r:priv_app:s0:c512,c768";
+constexpr std::string_view source_contexts[] = {
+        "tcontext=u:r:su:s0",
+        "tcontext=u:r:magisk:s0"
+};
+```
+
+This works for a narrow root-domain detector, but it is weak once the detection surface is generalized. A third-party app can still look for other leaked domains, and the fixed replacement string can itself become a fingerprint.
+
+### PatchAudit
+
+[PatchAudit](https://github.com/vwww-droid/PatchAudit) follows the same general direction, but changes the matching and replacement strategy.
+
+First, it does not only match `magisk` or `su`. Any audit message that has `tcontext=` and looks procfs-related through `dev="proc"` or `path="/proc/"` becomes a rewrite candidate.
+
+```c
+static bool is_procfs_audit_with_target_context(const char *message) {
+    if (message == NULL) {
+        return false;
+    }
+
+    const bool has_tcontext = contains(message, "tcontext=");
+    const bool is_procfs =
+        contains(message, "dev=\"proc\"") ||
+        contains(message, "path=\"/proc/");
+
+    return has_tcontext && is_procfs;
+}
+```
+
+Second, the fake `priv_app` MLS categories are not hard-coded. They are generated once per `logd` lifecycle and remain stable during that lifecycle.
+
+```c
+static char g_fake_tcontext[64] = "u:r:priv_app:s0:c512,c768";
+
+static void init_fake_tcontext(void) {
+    const uint32_t low = make_seed() & 0xffU;
+    const uint32_t high = low + 256U;
+
+    snprintf(
+        g_fake_tcontext,
+        sizeof(g_fake_tcontext),
+        "u:r:priv_app:s0:c%u,c%u,c512,c768",
+        low,
+        high
+    );
+}
+```
+
+The value is not randomized for every log line. It is stable for the current `logd` lifetime, which looks more natural than high-frequency per-line randomness.
+
+On an arm64 rooted test device, this hid the procfs audit side channels described in this article. However, in a scrcpy scenario without root-level intervention, the high-PID `u:r:shell:s0` cluster can still be detected. That is why the detection method remains useful as a practical risk signal.
+
+```diff
+- tcontext=u:r:magisk:s0
++ tcontext=u:r:priv_app:s0:c115,c371,c512,c768
+```
+
+Other device families have not been systematically tested. If there are issues, they can be reported to PatchAudit.
+
+## Source cases and scripts
+
+This post is distilled from the following Mira cases:
 
 1. [Android proc audit side channel detects Magisk SELinux context](https://github.com/vwww-droid/Mira/blob/main/knowledge/cases/zh/2026/2026-05-19-android-proc-audit-magisk-sidechannel.md)
 2. [Android emulator proc audit side channel exposes qemu SELinux context](https://github.com/vwww-droid/Mira/blob/main/knowledge/cases/zh/2026/2026-05-20-android-emulator-proc-audit-sidechannel.md)
@@ -295,10 +366,18 @@ Companion scripts, with parameters such as PID ranges and wait times expected to
 2. [mira-emulator-audit-sidechannel.sh](https://github.com/vwww-droid/Mira/blob/main/tools/android/mira-emulator-audit-sidechannel.sh)
 3. [mira-high-pid-shell-audit-sidechannel.sh](https://github.com/vwww-droid/Mira/blob/main/tools/android/mira-high-pid-shell-audit-sidechannel.sh)
 
-Mira is mainly a debugging entry point here. The detection logic does not need to be hardcoded into the app first. It is better to validate the idea with shell scripts, then decide whether it is stable enough to become a reusable case or rule based on results from different devices.
+Mira is mainly a debugging entry point here. The detection logic does not need to be hard-coded into the app first. It is better to validate the idea with shell scripts, then decide whether it is stable enough to become a reusable case or rule based on results from different devices.
+
+## Takeaway
+
+This side channel does not bypass SELinux. It relies on diagnostics generated after SELinux correctly denies access. That makes the bug interesting: the protected data path is blocked, but the failure report can still reveal enough context to classify the target process.
+
+For defenders, the AOSP fix closes the cleanest leak path by filtering app-triggered procfs audit messages before they reach app-visible log buffers. For researchers, the pattern is still useful as a reminder to inspect diagnostic surfaces, not only successful read APIs.
 
 ## References
 
 1. AOSP Gerrit: [Hide procfs related audit messages from appdomain](https://android-review.googlesource.com/c/platform/system/logging/+/3725346)
 2. AOSP Docs: [Validate SELinux](https://source.android.com/docs/security/features/selinux/validate)
 3. AOSP Docs: [Understand logging](https://source.android.com/docs/core/tests/debug/understanding-logging)
+4. [ZN-AuditPatch](https://github.com/aviraxp/ZN-AuditPatch)
+5. [PatchAudit](https://github.com/vwww-droid/PatchAudit)
