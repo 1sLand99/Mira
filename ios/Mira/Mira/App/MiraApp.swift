@@ -1,5 +1,4 @@
 import SwiftUI
-import Darwin
 
 @main
 struct MiraApp: App {
@@ -28,11 +27,6 @@ struct MiraApp: App {
 
     private func emitStandardStreamSmokeTestIfRequested() {
         guard ProcessInfo.processInfo.environment[EnvironmentKeys.logSmokeTest] == "1" else { return }
-        "mira-ios-log-smoke stdout\n".withCString { pointer in
-            _ = Darwin.write(STDOUT_FILENO, pointer, strlen(pointer))
-        }
-        "mira-ios-log-smoke stderr\n".withCString { pointer in
-            _ = Darwin.write(STDERR_FILENO, pointer, strlen(pointer))
-        }
+        mira_ios_emit_log_smoke_test()
     }
 }
