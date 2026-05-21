@@ -1,0 +1,46 @@
+name: Detection idea
+description: Suggest a reusable mobile runtime detection case or workflow.
+title: "detection: "
+labels: ["detection", "research", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for ideas that could become reusable Mira detection knowledge, scripts, or case notes.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - iOS
+        - Cross-platform
+        - Relay or MCP workflow
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: signal
+    attributes:
+      label: Detection signal
+      description: What runtime signal, side channel, artifact, or behavior should Mira observe?
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario and value
+      description: What real-world analysis problem does this help solve?
+    validations:
+      required: true
+  - type: textarea
+    id: experiment
+    attributes:
+      label: Suggested experiment
+      description: How could this be reproduced or validated?
+      placeholder: Include device setup, commands, scripts, or expected traces.
+  - type: textarea
+    id: references
+    attributes:
+      label: References or related work
+      description: Links to articles, tools, cases, or prior art.

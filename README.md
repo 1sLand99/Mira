@@ -53,6 +53,17 @@ Mobile runtime detection workbench for iOS and Android.
 - **iOS**: Verified on a real device running iOS 16.7.10. See [`docs/GETTING-STARTED.md`](./docs/GETTING-STARTED.md).
 - **AI**: `PYTHONPATH=. python3 -m mira.mcp.server --relay http://127.0.0.1:8765`. MCP config: [`docs/MCP.md`](./docs/MCP.md).
 
+## Contributing
+
+Mira welcomes issues and pull requests from mobile security researchers, reverse engineers, Frida users, MCP users, and device testers.
+
+- Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a focused pull request.
+- Use the issue templates for bugs, security hardening, detection ideas, and device compatibility reports.
+- For security reports, read [`SECURITY.md`](./SECURITY.md) first.
+- Scanner-generated hardening PRs are welcome when they include repository-specific reachability reasoning and verification.
+
+Good starting points include native memory-safety review, Android and iOS device testing, Frida workflow examples, MCP client setup notes, and new reusable detection cases.
+
 ## Live Discovery Examples
 
 <table>

@@ -1,0 +1,56 @@
+name: Device compatibility
+description: Report whether Mira works on a specific Android or iOS device.
+title: "compat: "
+labels: ["compatibility", "device", "needs-triage"]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android physical device
+        - Android emulator
+        - iOS physical device
+        - iOS simulator
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device model
+      placeholder: "Pixel 8, iPhone 8, emulator profile, etc."
+    validations:
+      required: true
+  - type: input
+    id: os_version
+    attributes:
+      label: OS version
+      placeholder: "Android 15, iOS 16.7.10, etc."
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Partially works
+        - Does not work
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: flow
+    attributes:
+      label: Tested flow
+      description: What did you test?
+      placeholder: Relay connect, shell, screen, Frida, MCP, install, launch, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details and logs
+      description: Include relevant commands, screenshots, terminal output, or relay logs.
+      render: shell

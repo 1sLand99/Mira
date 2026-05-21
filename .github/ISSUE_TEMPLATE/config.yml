@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security policy
+    url: https://github.com/vwww-droid/Mira/security/policy
+    about: Read this before reporting sensitive security issues.
+  - name: Documentation
+    url: https://github.com/vwww-droid/Mira/tree/main/docs
+    about: Check setup, MCP, Relay, iOS, Android, and architecture documentation.

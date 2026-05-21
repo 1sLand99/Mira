@@ -53,6 +53,17 @@
 - **iOS**: 当前验证的是 iOS 16.7.10 真机. 详见 [`docs/GETTING-STARTED.zh-CN.md`](./docs/GETTING-STARTED.zh-CN.md)
 - **AI 接入**: `PYTHONPATH=. python3 -m mira.mcp.server --relay http://127.0.0.1:8765`. MCP 配置见 [`docs/MCP.zh-CN.md`](./docs/MCP.zh-CN.md)
 
+## Contributing
+
+Mira 欢迎移动安全研究员, 逆向工程师, Frida 用户, MCP 用户和真机测试者提交 issue 与 pull request.
+
+- 提交聚焦的 pull request 前, 请先阅读 [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+- 提 bug, 安全加固, 检测思路或设备兼容性反馈时, 优先使用 issue templates.
+- 提交安全报告前, 请先阅读 [`SECURITY.md`](./SECURITY.md).
+- scanner 自动生成的安全加固 PR 也欢迎, 但需要说明在 Mira 仓库中的真实可达路径和验证结果.
+
+适合作为起点的方向包括 native 内存安全审查, Android 与 iOS 真机测试, Frida 工作流示例, MCP 客户端接入说明, 以及新的可复用检测案例.
+
 ## Live Discovery Examples
 
 <table>

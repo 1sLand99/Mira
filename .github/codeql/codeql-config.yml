@@ -1,0 +1,9 @@
+name: Mira CodeQL config
+
+queries:
+  - uses: security-and-quality
+
+paths-ignore:
+  - build/**
+  - third_party/**
+  - apps/console/.next/**

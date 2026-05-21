@@ -1,0 +1,82 @@
+name: Security hardening
+description: Report a security issue or propose a hardening improvement.
+title: "security: "
+labels: ["security", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for public, non-sensitive hardening reports. If the report is sensitive, follow SECURITY.md first.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Native C or Objective-C code
+        - Android app
+        - iOS app
+        - Relay
+        - MCP server
+        - Build or release pipeline
+        - Dependency or vendored code
+        - Documentation or unsafe default
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: affected
+    attributes:
+      label: Affected file or function
+      placeholder: "native/src/shell/builtin_shell.c:mira_builtin_append_locked"
+    validations:
+      required: true
+  - type: dropdown
+    id: finding_type
+    attributes:
+      label: Finding type
+      options:
+        - Memory safety
+        - Integer overflow or bounds check
+        - Trust boundary or exposure
+        - Command execution or shell behavior
+        - Dependency vulnerability
+        - Build or CI weakness
+        - Documentation hardening
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What could go wrong in Mira's actual runtime model?
+      placeholder: Explain the realistic attacker, input source, or failure mode.
+    validations:
+      required: true
+  - type: textarea
+    id: reachability
+    attributes:
+      label: Reachability reasoning
+      description: Explain why this path can be reached in this repository, not only the generic CWE class.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction or proof of concept
+      description: Include commands, input, traces, or static reasoning.
+      render: shell
+  - type: textarea
+    id: proposed_fix
+    attributes:
+      label: Proposed fix
+      description: Describe the patch or link a pull request.
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification performed
+      description: Build, tests, scanner output, or manual checks.
+      placeholder: |
+        - Build:
+        - Test:
+        - Manual verification:

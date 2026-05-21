@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a reproducible Mira bug.
+title: "bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Mira. Please include enough detail for someone else to reproduce the issue.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Mira is affected?
+      options:
+        - Android app
+        - iOS app
+        - Relay
+        - MCP server
+        - Native shell or PTY
+        - Frida workflow
+        - Documentation
+        - Build or release
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: Describe the issue in one or two paragraphs.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: List the exact steps, commands, or UI actions.
+      placeholder: |
+        1. Start Relay with ...
+        2. Install ...
+        3. Run ...
+        4. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mira version or commit
+      placeholder: "release tag, branch, or commit SHA"
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Device, OS, host system, Python version, Xcode or Android SDK version when relevant.
+      placeholder: |
+        Host:
+        Device:
+        OS:
+        Python:
+        Xcode or Android SDK:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant logs, terminal output, screenshots, or screen recordings.
+      render: shell
