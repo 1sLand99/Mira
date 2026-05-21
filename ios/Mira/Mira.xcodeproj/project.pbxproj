@@ -14,6 +14,7 @@
 		A10000000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* Assets.xcassets */; };
 		A30000000000000000000001 /* MiraRemoteServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000011 /* MiraRemoteServices.swift */; };
 		A30000000000000000000002 /* MiraFridaLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000012 /* MiraFridaLoader.swift */; };
+		A30000000000000000000003 /* MiraDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000013 /* MiraDiagnostics.swift */; };
 
 		A20000000000000000000001 /* mira_pty_ios_shim.c in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* mira_pty_ios_shim.c */; };
 		A20000000000000000000002 /* mira_ios_relay.c in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* mira_ios_relay.c */; };
@@ -25,6 +26,8 @@
 		A20000000000000000000008 /* ish_shell.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* ish_shell.m */; };
 		A20000000000000000000009 /* ish_hostfs.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000001A /* ish_hostfs.m */; };
 		A40000000000000000000001 /* mira_ios_frida_loader.m in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000011 /* mira_ios_frida_loader.m */; };
+		A40000000000000000000002 /* fishhook.c in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000012 /* fishhook.c */; };
+		A40000000000000000000003 /* mira_ios_log_hook.c in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000014 /* mira_ios_log_hook.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +39,7 @@
 		A10000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A30000000000000000000011 /* MiraRemoteServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiraRemoteServices.swift; sourceTree = "<group>"; };
 		A30000000000000000000012 /* MiraFridaLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiraFridaLoader.swift; sourceTree = "<group>"; };
+		A30000000000000000000013 /* MiraDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiraDiagnostics.swift; sourceTree = "<group>"; };
 
 		A20000000000000000000010 /* Mira-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Mira-Bridging-Header.h"; sourceTree = "<group>"; };
 		A20000000000000000000011 /* mira_pty_ios_shim.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "../../native/bridge/ios/mira_pty_ios_shim.c"; sourceTree = SOURCE_ROOT; };
@@ -50,6 +54,9 @@
 		A2000000000000000000001A /* ish_hostfs.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "../../native/src/shell/ish_hostfs.m"; sourceTree = SOURCE_ROOT; };
 		A2000000000000000000001B /* ish_hostfs.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "../../native/src/shell/ish_hostfs.h"; sourceTree = SOURCE_ROOT; };
 		A40000000000000000000011 /* mira_ios_frida_loader.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "../../native/bridge/ios/mira_ios_frida_loader.m"; sourceTree = SOURCE_ROOT; };
+		A40000000000000000000012 /* fishhook.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "../../native/bridge/ios/fishhook.c"; sourceTree = SOURCE_ROOT; };
+		A40000000000000000000013 /* fishhook.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "../../native/bridge/ios/fishhook.h"; sourceTree = SOURCE_ROOT; };
+		A40000000000000000000014 /* mira_ios_log_hook.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "../../native/bridge/ios/mira_ios_log_hook.c"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -104,6 +111,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000014 /* MiraNativeStatus.swift */,
+				A30000000000000000000013 /* MiraDiagnostics.swift */,
 				A30000000000000000000012 /* MiraFridaLoader.swift */,
 				A30000000000000000000011 /* MiraRemoteServices.swift */,
 				A20000000000000000000010 /* Mira-Bridging-Header.h */,
@@ -118,6 +126,9 @@
 				A20000000000000000000011 /* mira_pty_ios_shim.c */,
 				A20000000000000000000012 /* mira_ios_relay.c */,
 				A40000000000000000000011 /* mira_ios_frida_loader.m */,
+				A40000000000000000000012 /* fishhook.c */,
+				A40000000000000000000013 /* fishhook.h */,
+				A40000000000000000000014 /* mira_ios_log_hook.c */,
 				A20000000000000000000013 /* shell_core.c */,
 				A20000000000000000000014 /* builtin_shell.c */,
 				A20000000000000000000015 /* pty_core.c */,
@@ -253,6 +264,8 @@
 				A20000000000000000000001 /* mira_pty_ios_shim.c in Sources */,
 				A20000000000000000000002 /* mira_ios_relay.c in Sources */,
 				A40000000000000000000001 /* mira_ios_frida_loader.m in Sources */,
+				A40000000000000000000002 /* fishhook.c in Sources */,
+				A40000000000000000000003 /* mira_ios_log_hook.c in Sources */,
 				A20000000000000000000003 /* shell_core.c in Sources */,
 				A20000000000000000000004 /* builtin_shell.c in Sources */,
 				A20000000000000000000005 /* pty_core.c in Sources */,
@@ -264,6 +277,7 @@
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* MiraControlViewModel.swift in Sources */,
 				A10000000000000000000004 /* MiraNativeStatus.swift in Sources */,
+				A30000000000000000000003 /* MiraDiagnostics.swift in Sources */,
 				A30000000000000000000002 /* MiraFridaLoader.swift in Sources */,
 				A30000000000000000000001 /* MiraRemoteServices.swift in Sources */,
 			);

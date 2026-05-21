@@ -9,11 +9,13 @@ import { shortId } from '@/lib/format';
 import { listDevices } from '@/lib/relay';
 import type { MiraDevice } from '@/lib/types';
 
+type ActivePanel = 'server-logs' | 'android-logcat' | 'ios-logs' | null;
+
 export default function RelayConsolePage() {
   const [devices, setDevices] = useState<MiraDevice[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [events, setEvents] = useState<ConsoleEvent[]>([]);
-  const [activePanel, setActivePanel] = useState<'server-logs' | 'android-logcat' | null>(null);
+  const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const devicesSnapshot = useRef('');
 
   const selectedDevice = useMemo(
@@ -85,9 +87,9 @@ export default function RelayConsolePage() {
               <Server className="h-3.5 w-3.5" strokeWidth={1.8} />
             </ToolbarIconButton>
             <ToolbarIconButton
-              title={activePanel === 'android-logcat' ? '关闭 Android logcat' : '打开 Android logcat'}
-              active={activePanel === 'android-logcat'}
-              onClick={() => setActivePanel((current) => (current === 'android-logcat' ? null : 'android-logcat'))}
+              title={deviceLogsTitle(activePanel, selectedDevice)}
+              active={activePanel === deviceLogsPanel(selectedDevice)}
+              onClick={() => setActivePanel((current) => (current === deviceLogsPanel(selectedDevice) ? null : deviceLogsPanel(selectedDevice)))}
             >
               <ScrollText className="h-3.5 w-3.5" strokeWidth={1.8} />
             </ToolbarIconButton>
@@ -111,6 +113,21 @@ export default function RelayConsolePage() {
       </div>
     </main>
   );
+}
+
+function deviceLogsPanel(device: MiraDevice): Exclude<ActivePanel, 'server-logs' | null> {
+  return isIosDevice(device) ? 'ios-logs' : 'android-logcat';
+}
+
+function deviceLogsTitle(activePanel: ActivePanel, device: MiraDevice): string {
+  const panel = deviceLogsPanel(device);
+  if (panel === 'ios-logs') return activePanel === panel ? '关闭 iOS 日志' : '打开 iOS 日志';
+  return activePanel === panel ? '关闭 Android logcat' : '打开 Android logcat';
+}
+
+function isIosDevice(device: MiraDevice): boolean {
+  const platform = `${device.platform || ''} ${device.osName || ''} ${device.model || ''} ${device.packageName || ''}`.toLowerCase();
+  return platform.includes('ios') || platform.includes('iphone') || platform.includes('ipad') || platform.endsWith('.ios');
 }
 
 function ToolbarIconButton({

@@ -16,6 +16,7 @@ extern "C" {
 const char *mira_pty_ios_backend_name(void);
 
 typedef void (*mira_ios_screen_input_callback_t)(const char *json, void *context);
+typedef char *(*mira_ios_log_provider_t)(int max_bytes);
 
 int mira_ios_relay_start(const char *relay_url, const char *device_name, const char *home_dir);
 int mira_ios_relay_start_with_device_info(
@@ -31,6 +32,8 @@ const char *mira_ios_relay_status(void);
 const char *mira_ios_relay_install_id(void);
 int mira_ios_relay_send_control_json(const char *json);
 void mira_ios_relay_set_screen_input_callback(mira_ios_screen_input_callback_t callback, void *context);
+void mira_ios_relay_set_log_provider(mira_ios_log_provider_t provider);
+void mira_ios_install_log_hooks(void);
 
 int mira_ios_frida_loader_ensure_loaded(void);
 const char *mira_ios_frida_loader_status(void);

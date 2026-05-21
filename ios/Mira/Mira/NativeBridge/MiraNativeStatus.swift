@@ -65,6 +65,13 @@ struct MiraNativeStatus {
         }
     }
 
+    static func installDiagnosticsLogProvider() {
+        mira_ios_relay_set_log_provider { maxBytes in
+            let snapshot = MiraDiagnostics.logSnapshot(maxBytes: Int(maxBytes))
+            return strdup(snapshot)
+        }
+    }
+
     @MainActor
     private static func modelName() -> String {
         let identifier = hardwareIdentifier()

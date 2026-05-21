@@ -192,7 +192,7 @@ export type ServerLogsResponse = {
   reset: boolean;
 };
 
-export type DeviceLogcatResponse = {
+export type DeviceCommandResponse = {
   ok: boolean;
   installId: string;
   requestId: string;
@@ -202,6 +202,10 @@ export type DeviceLogcatResponse = {
   stderr: string;
   error?: string;
 };
+
+export type DeviceLogcatResponse = DeviceCommandResponse;
+
+export type DeviceIosLogsResponse = DeviceCommandResponse;
 
 export type DeviceMetrics = {
   sampledAt?: number;

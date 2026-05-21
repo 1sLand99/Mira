@@ -5,7 +5,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { DeviceFrame } from '@/components/DeviceFrame';
 import { ConsoleEvent, TerminalStage } from '@/components/TerminalStage';
 import { deviceTitle, shortId } from '@/lib/format';
-import { fetchDeviceLogcat, fetchServerLogs } from '@/lib/relay';
+import { fetchDeviceIosLogs, fetchDeviceLogcat, fetchServerLogs } from '@/lib/relay';
 import type { MiraDevice } from '@/lib/types';
 
 export function Workbench({
@@ -22,7 +22,7 @@ export function Workbench({
   onBack: () => void;
   onEvent: (event: ConsoleEvent) => void;
   onRefreshDevices: () => void;
-  activePanel: 'server-logs' | 'android-logcat' | null;
+  activePanel: 'server-logs' | 'android-logcat' | 'ios-logs' | null;
   onClosePanel: () => void;
 }) {
   const hostRef = useRef<HTMLElement | null>(null);
@@ -43,10 +43,17 @@ export function Workbench({
   const [logcatTag, setLogcatTag] = useState('');
   const [logcatLevel, setLogcatLevel] = useState('');
   const [logcatSearch, setLogcatSearch] = useState('');
+  const [iosLogsText, setIosLogsText] = useState('');
+  const [iosLogsLoading, setIosLogsLoading] = useState(false);
+  const [iosLogsError, setIosLogsError] = useState('');
+  const [iosLogsAt, setIosLogsAt] = useState('');
+  const [iosLogsCount, setIosLogsCount] = useState(1000);
+  const [iosLogsSearch, setIosLogsSearch] = useState('');
   const adaptiveLeftWidth = useMemo(() => adaptiveDevicePaneWidth(selectedDevice, hostSize), [hostSize, selectedDevice]);
   const leftWidth = clampPaneSize(manualLeftWidth ?? adaptiveLeftWidth, minDevicePaneWidth(hostSize), maxDevicePaneWidth(hostSize));
   const platform = devicePlatform(selectedDevice);
   const filteredLogcat = useMemo(() => filterLogText(logcatText, logcatSearch), [logcatSearch, logcatText]);
+  const filteredIosLogs = useMemo(() => filterLogText(iosLogsText, iosLogsSearch), [iosLogsSearch, iosLogsText]);
 
   const loadServerLogs = useCallback(
     async (mode: 'reset' | 'append' = 'append') => {
@@ -106,6 +113,10 @@ export function Workbench({
     setLogcatError('');
     setLogcatAt('');
     setLogcatSearch('');
+    setIosLogsText('');
+    setIosLogsError('');
+    setIosLogsAt('');
+    setIosLogsSearch('');
   }, [selectedDevice.installId]);
 
   const loadLogcat = useCallback(
@@ -147,6 +158,43 @@ export function Workbench({
     if (logcatText || logcatLoading) return;
     void loadLogcat();
   }, [activePanel, loadLogcat, logcatLoading, logcatText]);
+
+  const loadIosLogs = useCallback(
+    async () => {
+      if (devicePlatform(selectedDevice) !== 'ios') {
+        setIosLogsError('当前只支持 iOS 设备日志.');
+        setIosLogsText('');
+        return;
+      }
+      setIosLogsLoading(true);
+      setIosLogsError('');
+      try {
+        const response = await fetchDeviceIosLogs({
+          installId: selectedDevice.installId,
+          count: iosLogsCount,
+          timeoutMs: 10000,
+        });
+        const stderr = response.stderr ? `\n\n[stderr]\n${response.stderr.trim()}` : '';
+        const output = `${response.stdout || ''}${stderr}`.trim();
+        setIosLogsText((output || '(iOS log request returned no output)').split('\n').slice(-5000).join('\n'));
+        setIosLogsAt(new Date().toLocaleTimeString());
+        if (!response.ok) setIosLogsError(response.error || response.stderr || `iOS log command exited with ${response.exitCode}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setIosLogsError(message);
+        setIosLogsText(message || 'iOS log request failed');
+      } finally {
+        setIosLogsLoading(false);
+      }
+    },
+    [iosLogsCount, selectedDevice],
+  );
+
+  useEffect(() => {
+    if (activePanel !== 'ios-logs') return;
+    if (iosLogsText || iosLogsLoading) return;
+    void loadIosLogs();
+  }, [activePanel, iosLogsLoading, iosLogsText, loadIosLogs]);
 
   useEffect(() => {
     setInfoHeight((current) => clampPaneSize(current, minInfoPanelHeight(hostSize), maxInfoPanelHeight(hostSize)));
@@ -255,6 +303,22 @@ export function Workbench({
         onLevelChange={setLogcatLevel}
         onSearchChange={setLogcatSearch}
         onRefresh={() => loadLogcat()}
+      />
+      <IosLogsPanel
+        open={activePanel === 'ios-logs'}
+        onClose={onClosePanel}
+        platform={platform}
+        text={filteredIosLogs.text}
+        rawLineCount={filteredIosLogs.rawLineCount}
+        shownLineCount={filteredIosLogs.shownLineCount}
+        loading={iosLogsLoading}
+        error={iosLogsError}
+        updatedAt={iosLogsAt}
+        count={iosLogsCount}
+        search={iosLogsSearch}
+        onCountChange={setIosLogsCount}
+        onSearchChange={setIosLogsSearch}
+        onRefresh={() => loadIosLogs()}
       />
     </section>
   );
@@ -809,6 +873,105 @@ function AndroidLogcatPanel({
         <div className="min-h-0 flex-1 overflow-auto px-3 py-2 text-[12px] text-[#2e2e2e]">
           {error ? <div className="mb-2 text-[12px] text-[#d85a47]">{error}</div> : null}
           <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-[#2e2e2e]">{text || (hasSearch ? 'No matching logcat lines.' : 'Click Refresh to read Android logcat.')}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IosLogsPanel({
+  open,
+  platform,
+  text,
+  rawLineCount,
+  shownLineCount,
+  loading,
+  error,
+  updatedAt,
+  count,
+  search,
+  onCountChange,
+  onSearchChange,
+  onRefresh,
+  onClose,
+}: {
+  open: boolean;
+  platform: DevicePlatform;
+  text: string;
+  rawLineCount: number;
+  shownLineCount: number;
+  loading: boolean;
+  error: string;
+  updatedAt: string;
+  count: number;
+  search: string;
+  onCountChange: (value: number) => void;
+  onSearchChange: (value: string) => void;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  const disabled = platform !== 'ios' || loading;
+  const hasSearch = search.trim().length > 0;
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/25 backdrop-blur-[1px]">
+      <div className="flex h-[min(86vh,760px)] w-[min(88vw,1040px)] flex-col overflow-hidden rounded border border-[#cfd9e4] bg-[#fff] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-[#d8d8d8] bg-[#f0f4fb] px-4 py-2">
+          <div className="font-mono text-[12px] font-semibold tracking-[0.12em] text-[#3f7fd3]">
+            iOS LOGS
+            {updatedAt ? <span className="ml-2 font-normal tracking-normal text-[#777]">updated {updatedAt}</span> : null}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="rounded border border-[#8f8f8f] bg-white px-2 py-0.5 text-[12px] font-semibold text-[#333] transition hover:bg-[#f0f7ff] disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={disabled}
+            >
+              {loading ? 'Loading...' : 'Refresh'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded border border-[#8f8f8f] bg-white px-2 py-0.5 text-[12px] text-[#333] transition hover:bg-[#f0f7ff]"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#ececec] bg-[#fafafa] px-3 py-2 font-mono text-[11px] text-[#555]">
+          <label className="flex items-center gap-1">
+            keep
+            <input
+              type="number"
+              min={1}
+              max={5000}
+              value={count}
+              onChange={(event) => onCountChange(clampPaneSize(Number(event.target.value) || 1, 1, 5000))}
+              className="h-6 w-20 rounded border border-[#bdbdbd] bg-white px-1 text-[#222]"
+              disabled={loading}
+            />
+          </label>
+          <label className="flex min-w-[240px] flex-1 items-center gap-1">
+            search
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder="keyword, stdout, stderr, crash..."
+              className="h-6 min-w-0 flex-1 rounded border border-[#bdbdbd] bg-white px-2 text-[#222]"
+            />
+          </label>
+          <div className="ml-auto whitespace-nowrap text-[#777]">
+            {hasSearch ? `${shownLineCount}/${rawLineCount} matched` : `${rawLineCount}/${count} lines`}
+          </div>
+        </div>
+        {platform !== 'ios' ? (
+          <div className="border-b border-[#ececec] px-3 py-2 font-mono text-[12px] text-[#777]">iOS logs are available only for iOS devices.</div>
+        ) : null}
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-2 text-[12px] text-[#2e2e2e]">
+          {error ? <div className="mb-2 text-[12px] text-[#d85a47]">{error}</div> : null}
+          <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-[#2e2e2e]">{text || (hasSearch ? 'No matching iOS log lines.' : 'Click Refresh to read iOS app logs.')}</pre>
         </div>
       </div>
     </div>

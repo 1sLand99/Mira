@@ -682,26 +682,25 @@ def build_logcat_args(body: dict[str, Any]) -> tuple[list[str], str | None]:
     return args, None
 
 
-async def api_device_logcat(state: RelayState, body: dict[str, Any]) -> bytes:
+async def api_device_command(state: RelayState, body: dict[str, Any], command: str, args: list[str] | None = None, extra: dict[str, Any] | None = None) -> bytes:
     install_id = str(body.get("installId") or "").strip()
     if not install_id:
         return json_response("400 Bad Request", {"error": "missing installId"})
-    args, error = build_logcat_args(body)
-    if error:
-        return json_response("400 Bad Request", {"error": error})
     request_timeout = int_field(body, "timeoutMs", 1000, 30000)
     if request_timeout is None:
         request_timeout = 15000
     request_id = uuid.uuid4().hex
-    payload = {
+    payload: dict[str, Any] = {
         "type": "device.command",
         "protocol": PROTOCOL_VERSION,
         "installId": install_id,
         "requestId": request_id,
-        "command": "mira-logcat",
-        "arguments": args,
+        "command": command,
+        "arguments": args or [],
         "timeoutMs": request_timeout,
     }
+    if extra:
+        payload.update(extra)
     request_timeout_seconds = request_timeout / 1000 + 5.0
     ok, send_error, response = await send_control_request(state, install_id, payload, request_timeout_seconds)
     if not ok:
@@ -718,13 +717,27 @@ async def api_device_logcat(state: RelayState, body: dict[str, Any]) -> bytes:
             "ok": bool(response.get("ok")),
             "installId": response.get("installId", install_id),
             "requestId": response.get("requestId", request_id),
-            "command": response.get("command", "mira-logcat"),
+            "command": response.get("command", command),
             "exitCode": response.get("exitCode", 1),
             "stdout": response.get("stdout", ""),
             "stderr": response.get("stderr", ""),
             "error": response.get("error", ""),
         },
     )
+
+
+async def api_device_logcat(state: RelayState, body: dict[str, Any]) -> bytes:
+    args, error = build_logcat_args(body)
+    if error:
+        return json_response("400 Bad Request", {"error": error})
+    return await api_device_command(state, body, "mira-logcat", args)
+
+
+async def api_device_ios_logs(state: RelayState, body: dict[str, Any]) -> bytes:
+    count = int_field(body, "count", 1, 5000)
+    if count is None:
+        return json_response("400 Bad Request", {"error": "invalid iOS log count"})
+    return await api_device_command(state, body, "mira-ios-logs", ["--tail", str(count)], {"count": count})
 
 
 async def api_screen_frame(state: RelayState, body: dict[str, Any]) -> bytes:
@@ -1183,6 +1196,9 @@ async def handle_control_ws(state: RelayState, reader: asyncio.StreamReader, wri
                 level = str(message.get("level") or "INFO").upper()
                 text = str(message.get("message") or "").strip()
                 details = message.get("details")
+                async with state.lock:
+                    if record := state.devices.get(install_id):
+                        record.last_seen = time.time()
                 suffix = ""
                 if details not in (None, "", {}, []):
                     try:
@@ -1538,6 +1554,8 @@ async def handle_client(state: RelayState, reader: asyncio.StreamReader, writer:
             writer.write(await api_browser_log(parse_json_body(body)))
         elif path == "/api/device/logcat" and method.upper() == "POST":
             writer.write(await api_device_logcat(state, parse_json_body(body)))
+        elif path == "/api/device/ios/logs" and method.upper() == "POST":
+            writer.write(await api_device_ios_logs(state, parse_json_body(body)))
         elif path == "/api/open" and method.upper() == "POST":
             writer.write(await api_open(state, parse_json_body(body)))
         elif path == "/api/close" and method.upper() == "POST":

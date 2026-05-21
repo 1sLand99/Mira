@@ -26,6 +26,8 @@
 
 #define MIRA_IOS_WS_MAX_FRAME (1024U * 1024U)
 #define MIRA_IOS_RELAY_RETRY_SECONDS 2
+#define MIRA_IOS_LOG_RING_LIMIT (96U * 1024U)
+#define MIRA_IOS_LOG_SNAPSHOT_LIMIT (64U * 1024U)
 
 static const char mira_b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -53,8 +55,11 @@ typedef struct mira_ios_relay_state {
     char home_dir[PATH_MAX];
     char install_id[64];
     char status[256];
+    char log_ring[MIRA_IOS_LOG_RING_LIMIT];
+    size_t log_length;
     mira_ios_screen_input_callback_t screen_input_callback;
     void *screen_input_context;
+    mira_ios_log_provider_t log_provider;
 } mira_ios_relay_state_t;
 
 typedef struct mira_ios_session_state {
@@ -88,9 +93,50 @@ static mira_ios_relay_state_t g_relay = {
     .home_dir = {0},
     .install_id = {0},
     .status = "idle",
+    .log_ring = {0},
+    .log_length = 0,
     .screen_input_callback = NULL,
     .screen_input_context = NULL,
+    .log_provider = NULL,
 };
+
+static void mira_log_append_locked(const char *message) {
+    if (message == NULL) message = "";
+    char line[512];
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    int prefix = snprintf(line, sizeof(line), "%04d-%02d-%02d %02d:%02d:%02d ",
+                          tmv.tm_year + 1900,
+                          tmv.tm_mon + 1,
+                          tmv.tm_mday,
+                          tmv.tm_hour,
+                          tmv.tm_min,
+                          tmv.tm_sec);
+    if (prefix < 0) prefix = 0;
+    snprintf(line + (size_t) prefix, sizeof(line) - (size_t) prefix, "%s\n", message);
+
+    size_t length = strlen(line);
+    if (length >= MIRA_IOS_LOG_RING_LIMIT) {
+        const char *tail = line + length - (MIRA_IOS_LOG_RING_LIMIT - 1U);
+        memmove(g_relay.log_ring, tail, MIRA_IOS_LOG_RING_LIMIT - 1U);
+        g_relay.log_length = MIRA_IOS_LOG_RING_LIMIT - 1U;
+        g_relay.log_ring[g_relay.log_length] = '\0';
+        return;
+    }
+    if (g_relay.log_length + length >= MIRA_IOS_LOG_RING_LIMIT) {
+        size_t drop = g_relay.log_length + length - (MIRA_IOS_LOG_RING_LIMIT - 1U);
+        if (drop < g_relay.log_length) {
+            memmove(g_relay.log_ring, g_relay.log_ring + drop, g_relay.log_length - drop);
+            g_relay.log_length -= drop;
+        } else {
+            g_relay.log_length = 0;
+        }
+    }
+    memcpy(g_relay.log_ring + g_relay.log_length, line, length);
+    g_relay.log_length += length;
+    g_relay.log_ring[g_relay.log_length] = '\0';
+}
 
 static void mira_status_set(const char *format, ...) {
     char message[256];
@@ -101,6 +147,7 @@ static void mira_status_set(const char *format, ...) {
 
     pthread_mutex_lock(&g_relay.mutex);
     snprintf(g_relay.status, sizeof(g_relay.status), "%s", message);
+    mira_log_append_locked(message);
     pthread_mutex_unlock(&g_relay.mutex);
     fprintf(stderr, "Mira iOS relay: %s\n", message);
 }
@@ -142,6 +189,12 @@ void mira_ios_relay_set_screen_input_callback(mira_ios_screen_input_callback_t c
     pthread_mutex_lock(&g_relay.mutex);
     g_relay.screen_input_callback = callback;
     g_relay.screen_input_context = context;
+    pthread_mutex_unlock(&g_relay.mutex);
+}
+
+void mira_ios_relay_set_log_provider(mira_ios_log_provider_t provider) {
+    pthread_mutex_lock(&g_relay.mutex);
+    g_relay.log_provider = provider;
     pthread_mutex_unlock(&g_relay.mutex);
 }
 
@@ -339,6 +392,134 @@ static int mira_json_get_int(const char *json, const char *key, int fallback) {
     ++cursor;
     while (*cursor && isspace((unsigned char) *cursor)) ++cursor;
     return atoi(cursor);
+}
+
+static char *mira_log_snapshot_alloc(int count) {
+    if (count <= 0) count = 1000;
+    pthread_mutex_lock(&g_relay.mutex);
+    size_t length = g_relay.log_length;
+    if (length == 0) {
+        pthread_mutex_unlock(&g_relay.mutex);
+        char *empty = (char *) malloc(26U);
+        if (empty != NULL) snprintf(empty, 26U, "(no iOS relay logs yet)\n");
+        return empty;
+    }
+    size_t start = 0;
+    int lines = 0;
+    for (size_t i = length; i > 0; --i) {
+        if (g_relay.log_ring[i - 1U] == '\n') {
+            ++lines;
+            if (lines > count) {
+                start = i;
+                break;
+            }
+        }
+    }
+    if (length - start > MIRA_IOS_LOG_SNAPSHOT_LIMIT) {
+        start = length - MIRA_IOS_LOG_SNAPSHOT_LIMIT;
+        while (start < length && g_relay.log_ring[start] != '\n') ++start;
+        if (start < length) ++start;
+    }
+    size_t snapshot_length = length - start;
+    char *snapshot = (char *) malloc(snapshot_length + 1U);
+    if (snapshot != NULL) {
+        memcpy(snapshot, g_relay.log_ring + start, snapshot_length);
+        snapshot[snapshot_length] = '\0';
+    }
+    pthread_mutex_unlock(&g_relay.mutex);
+    return snapshot;
+}
+
+static void mira_send_device_command_result(const char *request_json,
+                                            const char *command,
+                                            int ok,
+                                            int exit_code,
+                                            const char *stdout_text,
+                                            const char *stderr_text,
+                                            const char *error_text) {
+    char request_id[128] = {0};
+    char install_id[64] = {0};
+    char command_text[128] = {0};
+    mira_json_get_string(request_json, "requestId", request_id, sizeof(request_id));
+    if (command == NULL || command[0] == '\0') {
+        mira_json_get_string(request_json, "command", command_text, sizeof(command_text));
+        command = command_text;
+    }
+    pthread_mutex_lock(&g_relay.mutex);
+    snprintf(install_id, sizeof(install_id), "%s", g_relay.install_id);
+    pthread_mutex_unlock(&g_relay.mutex);
+
+    size_t stdout_cap = strlen(stdout_text == NULL ? "" : stdout_text) * 2U + 256U;
+    size_t stderr_cap = strlen(stderr_text == NULL ? "" : stderr_text) * 2U + 256U;
+    size_t error_cap = strlen(error_text == NULL ? "" : error_text) * 2U + 256U;
+    size_t command_cap = strlen(command == NULL ? "" : command) * 2U + 256U;
+    size_t json_cap = stdout_cap + stderr_cap + error_cap + command_cap + 1024U;
+    char *escaped_stdout = (char *) malloc(stdout_cap);
+    char *escaped_stderr = (char *) malloc(stderr_cap);
+    char *escaped_error = (char *) malloc(error_cap);
+    char *escaped_command = (char *) malloc(command_cap);
+    char *json = (char *) malloc(json_cap);
+    if (escaped_stdout == NULL || escaped_stderr == NULL || escaped_error == NULL || escaped_command == NULL || json == NULL) {
+        free(escaped_stdout);
+        free(escaped_stderr);
+        free(escaped_error);
+        free(escaped_command);
+        free(json);
+        return;
+    }
+    mira_json_escape(stdout_text == NULL ? "" : stdout_text, escaped_stdout, stdout_cap);
+    mira_json_escape(stderr_text == NULL ? "" : stderr_text, escaped_stderr, stderr_cap);
+    mira_json_escape(error_text == NULL ? "" : error_text, escaped_error, error_cap);
+    mira_json_escape(command == NULL ? "" : command, escaped_command, command_cap);
+    snprintf(json, json_cap,
+             "{\"type\":\"device.command.result\",\"protocol\":1,\"installId\":\"%s\",\"requestId\":\"%s\",\"command\":\"%s\",\"ok\":%s,\"exitCode\":%d,\"stdout\":\"%s\",\"stderr\":\"%s\",\"error\":\"%s\"}",
+             install_id,
+             request_id,
+             escaped_command,
+             ok ? "true" : "false",
+             exit_code,
+             escaped_stdout,
+             escaped_stderr,
+             escaped_error);
+    (void) mira_ios_relay_send_control_json(json);
+    free(escaped_stdout);
+    free(escaped_stderr);
+    free(escaped_error);
+    free(escaped_command);
+    free(json);
+}
+
+static void mira_handle_device_command(const char *json) {
+    char command[128] = {0};
+    if (!mira_json_get_string(json, "command", command, sizeof(command)) || command[0] == '\0') {
+        mira_send_device_command_result(json, "mira", 0, 2, "", "missing command\n", "missing command");
+        return;
+    }
+    if (strcmp(command, "mira-ios-logs") == 0) {
+        int max_bytes = mira_json_get_int(json, "maxBytes", (int) MIRA_IOS_LOG_SNAPSHOT_LIMIT);
+        if (max_bytes <= 0 || max_bytes > (int) MIRA_IOS_LOG_SNAPSHOT_LIMIT) max_bytes = (int) MIRA_IOS_LOG_SNAPSHOT_LIMIT;
+        mira_ios_log_provider_t provider = NULL;
+        pthread_mutex_lock(&g_relay.mutex);
+        provider = g_relay.log_provider;
+        pthread_mutex_unlock(&g_relay.mutex);
+        char *snapshot = provider != NULL ? provider(max_bytes) : NULL;
+        if (snapshot == NULL || snapshot[0] == '\0') {
+            free(snapshot);
+            int count = mira_json_get_int(json, "count", 1000);
+            snapshot = mira_log_snapshot_alloc(count);
+        }
+        if (snapshot == NULL) {
+            mira_send_device_command_result(json, command, 0, 1, "", "log snapshot allocation failed\n", "log snapshot allocation failed");
+            return;
+        }
+        mira_send_device_command_result(json, command, 1, 0, snapshot, "", "");
+        free(snapshot);
+        return;
+    }
+
+    char error[256];
+    snprintf(error, sizeof(error), "unsupported command: %s\n", command);
+    mira_send_device_command_result(json, command, 0, 127, "", error, error);
 }
 
 static int mira_mkdir_p(const char *path) {
@@ -890,6 +1071,8 @@ static void *mira_control_thread(void *arg) {
                     mira_status_set("session close requested");
                 } else if (strcmp(type, "screen.input") == 0) {
                     mira_dispatch_screen_input((const char *) frame.payload);
+                } else if (strcmp(type, "device.command") == 0) {
+                    mira_handle_device_command((const char *) frame.payload);
                 }
             }
             mira_ws_frame_free(&frame);

@@ -7,6 +7,7 @@ import type {
   ScreenInputResponse,
   ScreenInfoListResponse,
   ScreenInfoResponse,
+  DeviceIosLogsResponse,
   DeviceLogcatResponse,
   ServerLogsResponse,
 } from './types';
@@ -124,6 +125,14 @@ export function fetchDeviceLogcat(input: {
   timeoutMs?: number;
 }): Promise<DeviceLogcatResponse> {
   return request<DeviceLogcatResponse>('/api/device/logcat', input);
+}
+
+export function fetchDeviceIosLogs(input: {
+  installId: string;
+  count?: number;
+  timeoutMs?: number;
+}): Promise<DeviceIosLogsResponse> {
+  return request<DeviceIosLogsResponse>('/api/device/ios/logs', input);
 }
 
 

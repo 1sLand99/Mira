@@ -52,10 +52,12 @@ final class MiraControlViewModel: ObservableObject {
         relayURL = normalized
         if MiraNativeStatus.startRelay(url: normalized) {
             relayConnected = true
+            MiraDiagnostics.log(level: "INFO", scope: "relay", message: "started", details: ["url": normalized])
             MiraRemoteServices.shared.start(relayURL: normalized)
             statusText = MiraNativeStatus.current.ptyLifecycle
             startStatusPolling()
         } else {
+            MiraDiagnostics.log(level: "ERROR", scope: "relay", message: "start failed", details: ["url": normalized, "status": MiraNativeStatus.current.ptyLifecycle])
             statusText = MiraNativeStatus.current.ptyLifecycle
         }
     }
@@ -66,6 +68,7 @@ final class MiraControlViewModel: ObservableObject {
         relayConnected = false
         MiraRemoteServices.shared.stop()
         MiraNativeStatus.stopRelay()
+        MiraDiagnostics.log(level: "INFO", scope: "relay", message: "stopped")
         refreshNativeStatus()
     }
 
