@@ -394,42 +394,6 @@ static int mira_json_get_int(const char *json, const char *key, int fallback) {
     return atoi(cursor);
 }
 
-static char *mira_log_snapshot_alloc(int count) {
-    if (count <= 0) count = 1000;
-    pthread_mutex_lock(&g_relay.mutex);
-    size_t length = g_relay.log_length;
-    if (length == 0) {
-        pthread_mutex_unlock(&g_relay.mutex);
-        char *empty = (char *) malloc(26U);
-        if (empty != NULL) snprintf(empty, 26U, "(no iOS relay logs yet)\n");
-        return empty;
-    }
-    size_t start = 0;
-    int lines = 0;
-    for (size_t i = length; i > 0; --i) {
-        if (g_relay.log_ring[i - 1U] == '\n') {
-            ++lines;
-            if (lines > count) {
-                start = i;
-                break;
-            }
-        }
-    }
-    if (length - start > MIRA_IOS_LOG_SNAPSHOT_LIMIT) {
-        start = length - MIRA_IOS_LOG_SNAPSHOT_LIMIT;
-        while (start < length && g_relay.log_ring[start] != '\n') ++start;
-        if (start < length) ++start;
-    }
-    size_t snapshot_length = length - start;
-    char *snapshot = (char *) malloc(snapshot_length + 1U);
-    if (snapshot != NULL) {
-        memcpy(snapshot, g_relay.log_ring + start, snapshot_length);
-        snapshot[snapshot_length] = '\0';
-    }
-    pthread_mutex_unlock(&g_relay.mutex);
-    return snapshot;
-}
-
 static void mira_send_device_command_result(const char *request_json,
                                             const char *command,
                                             int ok,
@@ -505,8 +469,7 @@ static void mira_handle_device_command(const char *json) {
         char *snapshot = provider != NULL ? provider(max_bytes) : NULL;
         if (snapshot == NULL || snapshot[0] == '\0') {
             free(snapshot);
-            int count = mira_json_get_int(json, "count", 1000);
-            snapshot = mira_log_snapshot_alloc(count);
+            snapshot = strdup("");
         }
         if (snapshot == NULL) {
             mira_send_device_command_result(json, command, 0, 1, "", "log snapshot allocation failed\n", "log snapshot allocation failed");
