@@ -22,8 +22,8 @@ private func miraDiagnosticsExceptionHandler(_ exception: NSException) {
     MiraDiagnostics.recordUncaughtException(exception)
 }
 
-/// iOS LOGS 只收集当前 App 进程内主动写入的诊断行, stdout/stderr 的 write hook, crash 记录, 以及当前进程权限内可读的 unified log.
-/// unified log 读取仅使用 OSLogStore.currentProcessIdentifier scope, 不读取系统级 unified log, 也不接收 Relay 的 server/control/device events.
+/// iOS LOGS 按 Android 三方 App 可见范围收口: App 主动诊断, stdout/stderr 的 write hook, crash 记录, 以及当前进程内 App/三方依赖的 unified log.
+/// unified log 读取仅使用 OSLogStore.currentProcessIdentifier scope, 并默认排除 com.apple.* 框架噪声, 不接收 Relay 的 server/control/device events.
 /// 当前保持轻量文件 sink, 后续如需要可替换为 CocoaLumberjack 文件日志库, 但本阶段不引入完整日志框架.
 enum MiraDiagnostics {
     private static let queue = DispatchQueue(label: "MiraDiagnostics")
@@ -150,6 +150,7 @@ enum MiraDiagnostics {
             lines.reserveCapacity(64)
             for entry in entries {
                 guard let log = entry as? OSLogEntryLog else { continue }
+                guard shouldIncludeUnifiedLog(log) else { continue }
                 lines.append(formatUnifiedLogLine(log))
                 if lines.count > maxUnifiedLogEntries {
                     lines.removeFirst(lines.count - maxUnifiedLogEntries)
@@ -162,6 +163,17 @@ enum MiraDiagnostics {
                 "error": String(describing: error),
             ])
         }
+    }
+
+    @available(iOS 15.0, *)
+    private static func shouldIncludeUnifiedLog(_ entry: OSLogEntryLog) -> Bool {
+        let subsystem = singleLine(entry.subsystem)
+        guard !subsystem.isEmpty else { return false }
+        if let bundleIdentifier = Bundle.main.bundleIdentifier,
+           (subsystem == bundleIdentifier || subsystem.hasPrefix("\(bundleIdentifier).")) {
+            return true
+        }
+        return !subsystem.hasPrefix("com.apple.")
     }
 
     @available(iOS 15.0, *)
