@@ -28,7 +28,7 @@ public final class MiraBootstrap {
     private static final String MANAGED_MARKER = "# Managed by MiraBootstrap";
     private static final String BOOTSTRAP_PREFIX_ASSET_ROOT = "bootstrap/prefix";
     private static final String INSTALL_STATE_FILE_NAME = ".mira-bootstrap-state";
-    private static final int INSTALL_STATE_VERSION = 4;
+    private static final int INSTALL_STATE_VERSION = 9;
     private static final AtomicBoolean INSTALL_COMPLETED = new AtomicBoolean(false);
     private static final Object INSTALL_LOCK = new Object();
 
@@ -73,6 +73,7 @@ public final class MiraBootstrap {
                 ensureRuntimeDirectories();
                 installBootstrapPrefixIfAvailable();
                 mkdir(new File(prefixDir, "bin"));
+                deleteStaleShellRuntimeFiles(new File(prefixDir, "bin"));
                 mkdir(new File(prefixDir, "etc"));
                 mkdir(new File(prefixDir, "etc/profile.d"));
                 mkdir(new File(prefixDir, "tmp"));
@@ -217,6 +218,8 @@ public final class MiraBootstrap {
             "export COLORTERM=\"${COLORTERM:-truecolor}\"\n" +
             "export MIRA_SANDBOX=1\n" +
             "export MIRA_PREFIX=\"$PREFIX\"\n" +
+            "cd \"$HOME\" 2>/dev/null || cd \"$TMPDIR\" 2>/dev/null || cd /\n" +
+            "export PWD=\"$(pwd)\"\n" +
             "export SHELL=\"$PREFIX/bin/sh\"\n" +
             "export ENV=\"$HOME/.profile\"\n" +
             "exec /system/bin/sh \"$@\"\n";
@@ -250,8 +253,32 @@ public final class MiraBootstrap {
         return MANAGED_MARKER + "\n" +
             "# Mira shell profile\n" +
             "[ -n \"$PREFIX\" ] && [ -f \"$PREFIX/etc/profile\" ] && . \"$PREFIX/etc/profile\"\n" +
+            "cd \"$HOME\" 2>/dev/null || cd \"$TMPDIR\" 2>/dev/null || cd /\n" +
+            "export PWD=\"$(pwd)\"\n" +
+            "mira_ls() {\n" +
+            "  if [ -n \"$MIRA_BUSYBOX\" ] && [ -x \"$MIRA_BUSYBOX\" ]; then \"$MIRA_BUSYBOX\" ls \"$@\"; else command ls \"$@\"; fi\n" +
+            "}\n" +
+            "mira_path() { printf '%s\\n' \"$PATH\" | tr ':' '\\n'; }\n" +
+            "mira_tools() { command -v sh ls cat grep sed awk ps top logcat python3 frida mira-info mira-logcat mira-getprop mira-dumpsys mira-settings 2>/dev/null; }\n" +
             "alias am='mira-am'\n" +
-            "export PS1='mira $ '\n";
+            "alias ls='mira_ls'\n" +
+            "alias l='mira_ls -CF'\n" +
+            "alias ll='mira_ls -alF'\n" +
+            "alias la='mira_ls -A'\n" +
+            "alias ..='cd ..'\n" +
+            "alias ...='cd ../..'\n" +
+            "alias up='cd ..'\n" +
+            "alias c='clear'\n" +
+            "alias cls='clear'\n" +
+            "alias md='mkdir -p'\n" +
+            "alias p='cd -'\n" +
+            "alias t='cd \"$TMPDIR\"'\n" +
+            "alias py='python3'\n" +
+            "alias path='mira_path'\n" +
+            "alias tools='mira_tools'\n" +
+            "alias props='mira-getprop'\n" +
+            "alias logs='mira-logcat'\n" +
+            "export PS1='$PWD $ '\n";
     }
 
     private String miraInfoScript() {
@@ -305,6 +332,29 @@ public final class MiraBootstrap {
         deleteLegacyFridaWrappers(binDir);
         for (String command : commands) {
             writeExecutable(new File(binDir, command), miraCommandScript(command));
+        }
+    }
+
+    private void deleteStaleShellRuntimeFiles(File binDir) throws IOException {
+        String[] staleFiles = new String[] {
+            "bash",
+            "bash.bin",
+            "coreutils",
+            "coreutils.bin",
+            "dirname",
+            "dirname.bin",
+            "find",
+            "find.bin",
+            "grep",
+            "grep.bin",
+            "ls",
+            "ls.bin"
+        };
+        for (String name : staleFiles) {
+            File file = new File(binDir, name);
+            if (file.exists() && !file.delete()) {
+                throw new IOException("无法删除旧版 shell runtime 文件: " + file.getAbsolutePath());
+            }
         }
     }
 

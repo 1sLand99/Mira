@@ -255,40 +255,15 @@ public final class MiraSelfScreenStreamer implements Closeable {
     }
 
     private void configureCodecWithTimeout(MediaCodec codec, MediaFormat format, VideoProfile profile) throws Exception {
-        CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<Throwable> error = new AtomicReference<>();
-        Thread configureThread = new Thread(() -> {
-            try {
-                codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-            } catch (Throwable throwable) {
-                error.set(throwable);
-            } finally {
-                latch.countDown();
-            }
-        }, "MiraAvcConfigure");
-        configureThread.setDaemon(true);
-        configureThread.start();
-
-        boolean completed;
+        long startedAt = SystemClock.uptimeMillis();
         try {
-            completed = latch.await(ENCODER_CONFIGURE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            throw interrupted;
-        }
-        if (!completed) {
-            Log.w(TAG, "AVC codec configure timeout " + profile.describe() + " timeoutMs=" + ENCODER_CONFIGURE_TIMEOUT_MS);
-            try {
-                codec.release();
-            } catch (Throwable ignored) {
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        } finally {
+            long elapsedMs = SystemClock.uptimeMillis() - startedAt;
+            if (elapsedMs > ENCODER_CONFIGURE_TIMEOUT_MS) {
+                Log.w(TAG, "AVC codec configure slow " + profile.describe() + " elapsedMs=" + elapsedMs);
             }
-            throw new IllegalStateException("AVC codec configure timeout");
         }
-        Throwable throwable = error.get();
-        if (throwable == null) return;
-        if (throwable instanceof Exception) throw (Exception) throwable;
-        if (throwable instanceof Error) throw (Error) throwable;
-        throw new RuntimeException(throwable);
     }
 
     private void encodeLoop(MiraWebSocketConnection connected, VideoProfile profile, MiraSelfScreenCapture.RootSize rootSize) throws Exception {

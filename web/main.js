@@ -5,13 +5,13 @@
   const terminal = new Terminal({
     cursorBlink: true,
     convertEol: true,
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-    fontSize: 13,
+    fontFamily: 'SFMono-Regular, ui-monospace, Menlo, Consolas, monospace',
+    fontSize: 14,
     theme: {
-      background: '#05070d',
-      foreground: '#e5e7eb',
-      cursor: '#34d399',
-      selectionBackground: '#334155',
+      background: '#0b0b0f',
+      foreground: '#f5f5f7',
+      cursor: '#0a84ff',
+      selectionBackground: '#3a3a3c',
     },
   });
   const fitAddon = new FitAddon.FitAddon();

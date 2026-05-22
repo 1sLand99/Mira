@@ -92,6 +92,7 @@ public final class MiraControlClient implements Closeable {
                 connected.sendJson(registerMessage());
                 notifyStatus("control connected");
                 readControlLoop();
+                if (running.get()) notifyStatus("control disconnected: closed");
             } catch (Throwable throwable) {
                 if (running.get()) {
                     Log.w(TAG, "Control channel failed", throwable);

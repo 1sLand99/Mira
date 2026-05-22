@@ -70,6 +70,7 @@ public final class MiraDiscoveryService extends Service {
     private volatile MiraSelfScreenStreamer screenStreamer;
     private volatile MiraLocalCommandServer commandServer;
     private volatile MiraTerminalServer terminalServer;
+    private volatile boolean controlReady;
 
     @Override
     public void onCreate() {
@@ -92,8 +93,7 @@ public final class MiraDiscoveryService extends Service {
             int nextDiscoveryPort = intent.getIntExtra(EXTRA_DISCOVERY_PORT, discoveryPort);
             String nextRelayUrl = intent.getStringExtra(EXTRA_RELAY_URL) == null ? "" : intent.getStringExtra(EXTRA_RELAY_URL).trim();
             if (running.get() && sameStartConfig(nextDeviceName, nextDiscoveryPort, nextRelayUrl)) {
-                ensureScreenStreamer();
-                publishStatus(nextRelayUrl.isEmpty() ? state : "control ready");
+                publishStatus(nextRelayUrl.isEmpty() ? state : (controlReady ? "control ready" : "connecting relay"));
                 Log.i(TAG, "Ignoring duplicate start for current relayUrl=" + relayUrl);
                 return START_NOT_STICKY;
             }
@@ -123,6 +123,7 @@ public final class MiraDiscoveryService extends Service {
         if (!running.compareAndSet(false, true)) return;
         int generation = lifecycleGeneration.incrementAndGet();
         state = "idle";
+        controlReady = false;
         try {
             bootstrap.installIfNeeded();
             startCommandServer();
@@ -177,19 +178,28 @@ public final class MiraDiscoveryService extends Service {
                 @Override
                 public void onControlStatus(String status) {
                     Log.i(TAG, "Control status " + status);
-                    if ("control ready".equals(status)) ensureScreenStreamer();
+                    if ("control ready".equals(status)) {
+                        controlReady = true;
+                        ensureScreenStreamer();
+                    } else {
+                        controlReady = false;
+                        closeScreenStreamer();
+                    }
                     publishStatus(status);
                 }
             }
         );
         controlClient.start();
-        startScreenStreamer();
         Log.i(TAG, "Control client starting relayUrl=" + relayUrl);
     }
 
     private synchronized void startScreenStreamer() {
         closeScreenStreamer();
         if (relayUrl == null || relayUrl.trim().isEmpty()) return;
+        if (!controlReady) {
+            Log.i(TAG, "Screen streamer start skipped until control ready");
+            return;
+        }
         MiraSelfScreenStreamer streamer = new MiraSelfScreenStreamer(this, identity, deviceName, relayUrl);
         screenStreamer = streamer;
         streamer.start();
@@ -197,6 +207,10 @@ public final class MiraDiscoveryService extends Service {
 
     private synchronized void ensureScreenStreamer() {
         if (relayUrl == null || relayUrl.trim().isEmpty()) return;
+        if (!controlReady) {
+            Log.i(TAG, "Screen streamer ensure skipped until control ready");
+            return;
+        }
         if (screenStreamer != null && screenStreamer.isAlive()) return;
         closeScreenStreamer();
         MiraSelfScreenStreamer streamer = new MiraSelfScreenStreamer(this, identity, deviceName, relayUrl);
@@ -244,6 +258,7 @@ public final class MiraDiscoveryService extends Service {
     private void stopDiscovery() {
         running.set(false);
         lifecycleGeneration.incrementAndGet();
+        controlReady = false;
         closeScreenStreamer();
         closeRelay();
         closeCommandServer();
