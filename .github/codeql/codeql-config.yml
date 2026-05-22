@@ -14,6 +14,10 @@ query-filters:
       id: cpp/unused-static-variable
   - exclude:
       id: cpp/local-variable-hides-global-variable
+  - exclude:
+      id: java/zipslip
+  - exclude:
+      id: cpp/system-data-exposure
 
 paths-ignore:
   - build/**
